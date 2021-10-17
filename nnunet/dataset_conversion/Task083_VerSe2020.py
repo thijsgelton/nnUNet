@@ -14,6 +14,7 @@
 
 
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from collections import OrderedDict
 from copy import deepcopy
 from multiprocessing.pool import Pool
@@ -77,8 +78,8 @@ if __name__ == "__main__":
             curr = join(base, "training_data", t)
             label_file = join(curr, p + "_seg.nii.gz")
             image_file = join(curr, p + ".nii.gz")
-            shutil.copy(image_file, join(imagestr, p + "_0000.nii.gz"))
-            shutil.copy(label_file, join(labelstr, p + ".nii.gz"))
+            shutil_sol.copyfile(image_file, join(imagestr, p + "_0000.nii.gz"))
+            shutil_sol.copyfile(label_file, join(labelstr, p + ".nii.gz"))
 
         train_patient_names += train_patient_names_here
 

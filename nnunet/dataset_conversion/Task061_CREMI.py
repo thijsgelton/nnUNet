@@ -19,6 +19,7 @@ from batchgenerators.utilities.file_and_folder_operations import *
 import numpy as np
 from nnunet.paths import nnUNet_raw_data, preprocessing_output_dir
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 import SimpleITK as sitk
 
 try:

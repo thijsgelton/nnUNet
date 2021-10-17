@@ -19,9 +19,9 @@ from collections import OrderedDict
 from nnunet.paths import nnUNet_raw_data
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from skimage import io
 import SimpleITK as sitk
-import shutil
 
 
 if __name__ == "__main__":
@@ -64,16 +64,16 @@ if __name__ == "__main__":
 
     # 5 copies, otherwise we cannot run nnunet (5 fold cv needs that)
     sitk.WriteImage(img_tr_itk, join(imagestr, "training0_0000.nii.gz"))
-    shutil.copy(join(imagestr, "training0_0000.nii.gz"), join(imagestr, "training1_0000.nii.gz"))
-    shutil.copy(join(imagestr, "training0_0000.nii.gz"), join(imagestr, "training2_0000.nii.gz"))
-    shutil.copy(join(imagestr, "training0_0000.nii.gz"), join(imagestr, "training3_0000.nii.gz"))
-    shutil.copy(join(imagestr, "training0_0000.nii.gz"), join(imagestr, "training4_0000.nii.gz"))
+    shutil_sol.copyfile(join(imagestr, "training0_0000.nii.gz"), join(imagestr, "training1_0000.nii.gz"))
+    shutil_sol.copyfile(join(imagestr, "training0_0000.nii.gz"), join(imagestr, "training2_0000.nii.gz"))
+    shutil_sol.copyfile(join(imagestr, "training0_0000.nii.gz"), join(imagestr, "training3_0000.nii.gz"))
+    shutil_sol.copyfile(join(imagestr, "training0_0000.nii.gz"), join(imagestr, "training4_0000.nii.gz"))
 
     sitk.WriteImage(lab_tr_itk, join(labelstr, "training0.nii.gz"))
-    shutil.copy(join(labelstr, "training0.nii.gz"), join(labelstr, "training1.nii.gz"))
-    shutil.copy(join(labelstr, "training0.nii.gz"), join(labelstr, "training2.nii.gz"))
-    shutil.copy(join(labelstr, "training0.nii.gz"), join(labelstr, "training3.nii.gz"))
-    shutil.copy(join(labelstr, "training0.nii.gz"), join(labelstr, "training4.nii.gz"))
+    shutil_sol.copyfile(join(labelstr, "training0.nii.gz"), join(labelstr, "training1.nii.gz"))
+    shutil_sol.copyfile(join(labelstr, "training0.nii.gz"), join(labelstr, "training2.nii.gz"))
+    shutil_sol.copyfile(join(labelstr, "training0.nii.gz"), join(labelstr, "training3.nii.gz"))
+    shutil_sol.copyfile(join(labelstr, "training0.nii.gz"), join(labelstr, "training4.nii.gz"))
 
     sitk.WriteImage(img_te_itk, join(imagests, "testing.nii.gz"))
     sitk.WriteImage(lab_te_itk, join(labelste, "testing.nii.gz"))

@@ -14,6 +14,7 @@
 
 
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from collections import OrderedDict
 from multiprocessing import Pool
 from time import sleep
@@ -307,10 +308,7 @@ class nnUNetTrainer(NetworkTrainer):
         del dct['dataset_tr']
         del dct['dataset_val']
         save_json(dct, join(self.output_folder, "debug.json"))
-
-        import shutil
-
-        shutil.copy(self.plans_file, join(self.output_folder_base, "plans.pkl"))
+        shutil_sol.copyfile(self.plans_file, join(self.output_folder_base, "plans.pkl"))
 
     def run_training(self):
         self.save_debug_information()
@@ -668,7 +666,7 @@ class nnUNetTrainer(NetworkTrainer):
             e = None
             while not success and attempts < 10:
                 try:
-                    shutil.copy(f, gt_nifti_folder)
+                    shutil_sol.copyfile(f, gt_nifti_folder)
                     success = True
                 except OSError as e:
                     attempts += 1

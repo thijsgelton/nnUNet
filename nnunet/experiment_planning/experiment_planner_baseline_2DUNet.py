@@ -14,6 +14,7 @@
 
 
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 
 import nnunet
 import numpy as np

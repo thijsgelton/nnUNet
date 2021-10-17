@@ -15,6 +15,7 @@
 from collections import OrderedDict
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 import numpy as np
 from sklearn.model_selection import KFold
 
@@ -28,8 +29,8 @@ def convert_to_submission(source_dir, target_dir):
         assert len(files_of_that_patient)
         files_of_that_patient.sort()
         # first is ED, second is ES
-        shutil.copy(join(source_dir, files_of_that_patient[0]), join(target_dir, p + "_ED.nii.gz"))
-        shutil.copy(join(source_dir, files_of_that_patient[1]), join(target_dir, p + "_ES.nii.gz"))
+        shutil_sol.copyfile(join(source_dir, files_of_that_patient[0]), join(target_dir, p + "_ED.nii.gz"))
+        shutil_sol.copyfile(join(source_dir, files_of_that_patient[1]), join(target_dir, p + "_ES.nii.gz"))
 
 
 if __name__ == "__main__":
@@ -51,8 +52,8 @@ if __name__ == "__main__":
         for d, s in zip(data_files_train, corresponding_seg_files):
             patient_identifier = d.split("/")[-1][:-7]
             all_train_files.append(patient_identifier + "_0000.nii.gz")
-            shutil.copy(d, join(out_folder, "imagesTr", patient_identifier + "_0000.nii.gz"))
-            shutil.copy(s, join(out_folder, "labelsTr", patient_identifier + ".nii.gz"))
+            shutil_sol.copyfile(d, join(out_folder, "imagesTr", patient_identifier + "_0000.nii.gz"))
+            shutil_sol.copyfile(s, join(out_folder, "labelsTr", patient_identifier + ".nii.gz"))
 
     # test
     all_test_files = []
@@ -63,7 +64,7 @@ if __name__ == "__main__":
         for d in data_files_test:
             patient_identifier = d.split("/")[-1][:-7]
             all_test_files.append(patient_identifier + "_0000.nii.gz")
-            shutil.copy(d, join(out_folder, "imagesTs", patient_identifier + "_0000.nii.gz"))
+            shutil_sol.copyfile(d, join(out_folder, "imagesTs", patient_identifier + "_0000.nii.gz"))
 
 
     json_dict = OrderedDict()

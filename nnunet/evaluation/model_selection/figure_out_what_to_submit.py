@@ -12,6 +12,7 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from itertools import combinations
 import nnunet
 from batchgenerators.utilities.file_and_folder_operations import *

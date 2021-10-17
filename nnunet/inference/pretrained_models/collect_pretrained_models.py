@@ -18,19 +18,20 @@ from multiprocessing.pool import Pool
 
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from nnunet.paths import default_cascade_trainer, default_plans_identifier, default_trainer, network_training_output_dir
 from nnunet.utilities.task_name_id_conversion import convert_id_to_task_name
 from subprocess import call
 
 
 def copy_fold(in_folder: str, out_folder: str):
-    shutil.copy(join(in_folder, "debug.json"), join(out_folder, "debug.json"))
-    shutil.copy(join(in_folder, "model_final_checkpoint.model"), join(out_folder, "model_final_checkpoint.model"))
-    shutil.copy(join(in_folder, "model_final_checkpoint.model.pkl"),
+    shutil_sol.copyfile(join(in_folder, "debug.json"), join(out_folder, "debug.json"))
+    shutil_sol.copyfile(join(in_folder, "model_final_checkpoint.model"), join(out_folder, "model_final_checkpoint.model"))
+    shutil_sol.copyfile(join(in_folder, "model_final_checkpoint.model.pkl"),
                 join(out_folder, "model_final_checkpoint.model.pkl"))
-    shutil.copy(join(in_folder, "progress.png"), join(out_folder, "progress.png"))
+    shutil_sol.copyfile(join(in_folder, "progress.png"), join(out_folder, "progress.png"))
     if isfile(join(in_folder, "network_architecture.pdf")):
-        shutil.copy(join(in_folder, "network_architecture.pdf"), join(out_folder, "network_architecture.pdf"))
+        shutil_sol.copyfile(join(in_folder, "network_architecture.pdf"), join(out_folder, "network_architecture.pdf"))
 
 
 def copy_model(directory: str, output_directory: str):
@@ -50,8 +51,8 @@ def copy_model(directory: str, output_directory: str):
         maybe_mkdir_p(join(output_directory, e))
         copy_fold(join(directory, e), join(output_directory, e))
 
-    shutil.copy(join(directory, "plans.pkl"), join(output_directory, "plans.pkl"))
-    shutil.copy(join(directory, "postprocessing.json"), join(output_directory, "postprocessing.json"))
+    shutil_sol.copyfile(join(directory, "plans.pkl"), join(output_directory, "plans.pkl"))
+    shutil_sol.copyfile(join(directory, "postprocessing.json"), join(output_directory, "postprocessing.json"))
 
 
 def copy_pretrained_models_for_task(task_name: str, output_directory: str,
@@ -108,7 +109,7 @@ def copy_ensembles(taskname, output_folder, valid_models=('2d', '3d_fullres', '3
     for v in valid:
         this_output = join(output_ensemble, v)
         maybe_mkdir_p(this_output)
-        shutil.copy(join(ensemble_dir, v, 'postprocessing.json'), this_output)
+        shutil_sol.copyfile(join(ensemble_dir, v, 'postprocessing.json'), this_output)
 
 
 def compress_everything(output_base, num_processes=8):

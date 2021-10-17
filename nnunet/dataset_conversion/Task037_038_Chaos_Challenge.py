@@ -15,6 +15,7 @@
 
 from PIL import Image
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from collections import OrderedDict
 
 import dicom2nifti
@@ -95,12 +96,12 @@ def convert_variant2_predicted_test_to_submission_format(folder_with_predictions
     maybe_mkdir_p(folder_for_ensembing1)
     # now copy all t1 out phases in ens0 and all in phases in ens1. Name them the same.
     for t1 in t1_patient_names:
-        shutil.copy(join(folder_with_predictions, "T1_in_%s.npz" % t1), join(folder_for_ensembing1, "T1_%s.npz" % t1))
-        shutil.copy(join(folder_with_predictions, "T1_in_%s.pkl" % t1), join(folder_for_ensembing1, "T1_%s.pkl" % t1))
-        shutil.copy(join(folder_with_predictions, "T1_out_%s.npz" % t1), join(folder_for_ensembing0, "T1_%s.npz" % t1))
-        shutil.copy(join(folder_with_predictions, "T1_out_%s.pkl" % t1), join(folder_for_ensembing0, "T1_%s.pkl" % t1))
-    shutil.copy(join(folder_with_predictions, "plans.pkl"), join(folder_for_ensembing0, "plans.pkl"))
-    shutil.copy(join(folder_with_predictions, "plans.pkl"), join(folder_for_ensembing1, "plans.pkl"))
+        shutil_sol.copyfile(join(folder_with_predictions, "T1_in_%s.npz" % t1), join(folder_for_ensembing1, "T1_%s.npz" % t1))
+        shutil_sol.copyfile(join(folder_with_predictions, "T1_in_%s.pkl" % t1), join(folder_for_ensembing1, "T1_%s.pkl" % t1))
+        shutil_sol.copyfile(join(folder_with_predictions, "T1_out_%s.npz" % t1), join(folder_for_ensembing0, "T1_%s.npz" % t1))
+        shutil_sol.copyfile(join(folder_with_predictions, "T1_out_%s.pkl" % t1), join(folder_for_ensembing0, "T1_%s.pkl" % t1))
+    shutil_sol.copyfile(join(folder_with_predictions, "plans.pkl"), join(folder_for_ensembing0, "plans.pkl"))
+    shutil_sol.copyfile(join(folder_with_predictions, "plans.pkl"), join(folder_for_ensembing1, "plans.pkl"))
 
     # there is a problem with T1_35 that I need to correct manually (different crop size, will not negatively impact results)
     #ens0_softmax = np.load(join(folder_for_ensembing0, "T1_35.npz"))['softmax']
@@ -109,7 +110,7 @@ def convert_variant2_predicted_test_to_submission_format(folder_with_predictions
     #ens1_props = load_pickle(join(folder_for_ensembing1, "T1_35.pkl"))
     ens1_softmax = ens1_softmax[:, :, :-1, :]
     np.savez_compressed(join(folder_for_ensembing1, "T1_35.npz"), softmax=ens1_softmax)
-    shutil.copy(join(folder_for_ensembing0, "T1_35.pkl"), join(folder_for_ensembing1, "T1_35.pkl"))
+    shutil_sol.copyfile(join(folder_for_ensembing0, "T1_35.pkl"), join(folder_for_ensembing1, "T1_35.pkl"))
 
     # now call my ensemble function
     merge((folder_for_ensembing0, folder_for_ensembing1), final_predictions_folder, 8, True,
@@ -117,7 +118,7 @@ def convert_variant2_predicted_test_to_submission_format(folder_with_predictions
     # copy t2 files to final_predictions_folder as well
     t2_files = subfiles(folder_with_predictions, prefix="T2", suffix=".nii.gz", join=False)
     for t2 in t2_files:
-        shutil.copy(join(folder_with_predictions, t2), join(final_predictions_folder, t2))
+        shutil_sol.copyfile(join(folder_with_predictions, t2), join(final_predictions_folder, t2))
 
     # apply postprocessing
     from nnunet.postprocessing.connected_components import apply_postprocessing_to_folder, load_postprocessing
@@ -248,7 +249,7 @@ if __name__ == "__main__":
         img_dir = join(d, p, "T2SPIR", "DICOM_anon")
         img_outfile = join(output_images, patient_name + "_0000.nii.gz")
         _ = dicom2nifti.convert_dicom.dicom_series_to_nifti(img_dir, img_outfile, reorient_nifti=False)
-        shutil.copy(join(output_images, patient_name + "_0000.nii.gz"), join(output_images, patient_name + "_0001.nii.gz"))
+        shutil_sol.copyfile(join(output_images, patient_name + "_0000.nii.gz"), join(output_images, patient_name + "_0001.nii.gz"))
 
         img_sitk = sitk.ReadImage(img_outfile)
         img_sitk_npy = sitk.GetArrayFromImage(img_sitk)
@@ -268,7 +269,7 @@ if __name__ == "__main__":
         img_dir = join(d, p, "T2SPIR", "DICOM_anon")
         img_outfile = join(output_imagesTs, patient_name + "_0000.nii.gz")
         _ = dicom2nifti.convert_dicom.dicom_series_to_nifti(img_dir, img_outfile, reorient_nifti=False)
-        shutil.copy(join(output_imagesTs, patient_name + "_0000.nii.gz"), join(output_imagesTs, patient_name + "_0001.nii.gz"))
+        shutil_sol.copyfile(join(output_imagesTs, patient_name + "_0000.nii.gz"), join(output_imagesTs, patient_name + "_0001.nii.gz"))
 
         img_sitk = sitk.ReadImage(img_outfile)
         img_sitk_npy = sitk.GetArrayFromImage(img_sitk)

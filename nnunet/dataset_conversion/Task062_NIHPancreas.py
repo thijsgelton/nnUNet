@@ -17,6 +17,7 @@ from collections import OrderedDict
 from nnunet.paths import nnUNet_raw_data
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from multiprocessing import Pool
 import nibabel
 
@@ -62,8 +63,8 @@ if __name__ == "__main__":
     folder_labels = join(base, "TCIA_pancreas_labels-02-05-2017")
     for c in cases:
         casename = "pancreas_%04.0d" % c
-        shutil.copy(join(folder_data, "PANCREAS_%04.0d.nii.gz" % c), join(imagestr, casename + "_0000.nii.gz"))
-        shutil.copy(join(folder_labels, "label%04.0d.nii.gz" % c), join(labelstr, casename + ".nii.gz"))
+        shutil_sol.copyfile(join(folder_data, "PANCREAS_%04.0d.nii.gz" % c), join(imagestr, casename + "_0000.nii.gz"))
+        shutil_sol.copyfile(join(folder_labels, "label%04.0d.nii.gz" % c), join(labelstr, casename + ".nii.gz"))
         train_patient_names.append(casename)
 
     json_dict = OrderedDict()

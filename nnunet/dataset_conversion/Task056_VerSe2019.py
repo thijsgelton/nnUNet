@@ -20,6 +20,7 @@ from nnunet.configuration import default_num_threads
 from nnunet.paths import nnUNet_raw_data
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from medpy import metric
 import numpy as np
 from nnunet.utilities.image_reorientation import reorient_all_images_in_folder_to_ras
@@ -144,14 +145,14 @@ if __name__ == "__main__":
         curr = join(base, "train")
         label_file = join(curr, p + "_seg.nii.gz")
         image_file = join(curr, p + ".nii.gz")
-        shutil.copy(image_file, join(imagestr, p + "_0000.nii.gz"))
-        shutil.copy(label_file, join(labelstr, p + ".nii.gz"))
+        shutil_sol.copyfile(image_file, join(imagestr, p + "_0000.nii.gz"))
+        shutil_sol.copyfile(label_file, join(labelstr, p + ".nii.gz"))
 
     test_patient_names = [i[:-7] for i in subfiles(join(base, "test"), join=False, suffix=".nii.gz")]
     for p in test_patient_names:
         curr = join(base, "test")
         image_file = join(curr, p + ".nii.gz")
-        shutil.copy(image_file, join(imagests, p + "_0000.nii.gz"))
+        shutil_sol.copyfile(image_file, join(imagests, p + "_0000.nii.gz"))
 
 
     json_dict = OrderedDict()

@@ -25,6 +25,7 @@ import SimpleITK as sitk
 from nnunet.utilities.sitk_stuff import copy_geometry
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 
 
 def load_remove_save(input_file: str, output_file: str, for_which_classes: list,

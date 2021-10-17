@@ -1,5 +1,6 @@
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 
 from nnunet.paths import nnUNet_raw_data
 from nnunet.dataset_conversion.utils import generate_dataset_json
@@ -28,8 +29,8 @@ if __name__ == '__main__':
     case_ids = subdirs(kits_data_dir, prefix='case_', join=False)
     for c in case_ids:
         if isfile(join(kits_data_dir, c, kits_segmentation_filename)):
-            shutil.copy(join(kits_data_dir, c, kits_segmentation_filename), join(labelstr, c + '.nii.gz'))
-            shutil.copy(join(kits_data_dir, c, 'imaging.nii.gz'), join(imagestr, c + '_0000.nii.gz'))
+            shutil_sol.copyfile(join(kits_data_dir, c, kits_segmentation_filename), join(labelstr, c + '.nii.gz'))
+            shutil_sol.copyfile(join(kits_data_dir, c, 'imaging.nii.gz'), join(imagestr, c + '_0000.nii.gz'))
 
     generate_dataset_json(join(out_base, 'dataset.json'),
                           imagestr,

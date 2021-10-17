@@ -13,6 +13,7 @@
 #    limitations under the License.
 import os
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from _warnings import warn
 from collections import OrderedDict
 from multiprocessing import Pool
@@ -582,7 +583,7 @@ class nnUNetTrainerV2_DDP(nnUNetTrainerV2):
                 e = None
                 while not success and attempts < 10:
                     try:
-                        shutil.copy(f, gt_nifti_folder)
+                        shutil_sol.copyfile(f, gt_nifti_folder)
                         success = True
                     except OSError as e:
                         attempts += 1

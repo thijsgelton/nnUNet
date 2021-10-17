@@ -17,6 +17,7 @@ from copy import deepcopy
 
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 import SimpleITK as sitk
 from multiprocessing import Pool
 from medpy.metric import dc
@@ -81,7 +82,7 @@ def remove_all_but_the_two_largest_conn_comp(img_itk_file: str, file_out: str):
         sitk.WriteImage(new, file_out)
         print(os.path.basename(img_itk_file), num_labels, label_sizes)
     else:
-        shutil.copy(img_itk_file, file_out)
+        shutil_sol.copyfile(img_itk_file, file_out)
 
 
 def manual_postprocess(folder_in,
@@ -116,7 +117,7 @@ def copy_npz_fom_valsets():
     for f in folders:
         out = join(base, f, 'crossval_npz')
         maybe_mkdir_p(out)
-        shutil.copy(join(base, f, 'plans.pkl'), out)
+        shutil_sol.copyfile(join(base, f, 'plans.pkl'), out)
         for fold in range(5):
             cur = join(base, f, 'fold_%d' % fold, 'validation_raw')
             npz_files = subfiles(cur, suffix='.npz', join=False)
@@ -124,8 +125,8 @@ def copy_npz_fom_valsets():
             assert all([isfile(join(cur, i)) for i in pkl_files])
             for n in npz_files:
                 corresponding_pkl = n[:-3] + 'pkl'
-                shutil.copy(join(cur, n), out)
-                shutil.copy(join(cur, corresponding_pkl), out)
+                shutil_sol.copyfile(join(cur, n), out)
+                shutil_sol.copyfile(join(cur, corresponding_pkl), out)
 
 
 def ensemble(experiments=('nnUNetTrainerNewCandidate23_FabiansPreActResNet__nnUNetPlans',
@@ -141,7 +142,7 @@ def prepare_submission(fld= "/home/fabian/drives/datasets/results/nnUNet/test_se
     maybe_mkdir_p(out)
     for n in nii:
         outfname = n.replace('case', 'prediction')
-        shutil.copy(join(fld, n), join(out, outfname))
+        shutil_sol.copyfile(join(fld, n), join(out, outfname))
 
 
 def pretent_to_be_nnUNetTrainer(base, folds=(0, 1, 2, 3, 4)):
@@ -210,10 +211,10 @@ if __name__ == "__main__":
     for c in cases:
         case_id = int(c.split("_")[-1])
         if case_id < 210:
-            shutil.copy(join(base, c, "imaging.nii.gz"), join(out, "imagesTr", c + "_0000.nii.gz"))
-            shutil.copy(join(base, c, "segmentation.nii.gz"), join(out, "labelsTr", c + ".nii.gz"))
+            shutil_sol.copyfile(join(base, c, "imaging.nii.gz"), join(out, "imagesTr", c + "_0000.nii.gz"))
+            shutil_sol.copyfile(join(base, c, "segmentation.nii.gz"), join(out, "labelsTr", c + ".nii.gz"))
         else:
-            shutil.copy(join(base, c, "imaging.nii.gz"), join(out, "imagesTs", c + "_0000.nii.gz"))
+            shutil_sol.copyfile(join(base, c, "imaging.nii.gz"), join(out, "imagesTs", c + "_0000.nii.gz"))
 
     json_dict = {}
     json_dict['name'] = "KiTS"

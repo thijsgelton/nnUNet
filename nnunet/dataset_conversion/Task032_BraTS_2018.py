@@ -21,6 +21,7 @@ from nnunet.dataset_conversion.Task043_BraTS_2019 import copy_BraTS_segmentation
 from nnunet.paths import nnUNet_raw_data
 import SimpleITK as sitk
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 
 
 def convert_labels_back_to_BraTS(seg: np.ndarray):
@@ -96,10 +97,10 @@ if __name__ == "__main__":
                 isfile(seg)
             ]), "%s" % patient_name
 
-            shutil.copy(t1, join(target_imagesTr, patient_name + "_0000.nii.gz"))
-            shutil.copy(t1c, join(target_imagesTr, patient_name + "_0001.nii.gz"))
-            shutil.copy(t2, join(target_imagesTr, patient_name + "_0002.nii.gz"))
-            shutil.copy(flair, join(target_imagesTr, patient_name + "_0003.nii.gz"))
+            shutil_sol.copyfile(t1, join(target_imagesTr, patient_name + "_0000.nii.gz"))
+            shutil_sol.copyfile(t1c, join(target_imagesTr, patient_name + "_0001.nii.gz"))
+            shutil_sol.copyfile(t2, join(target_imagesTr, patient_name + "_0002.nii.gz"))
+            shutil_sol.copyfile(flair, join(target_imagesTr, patient_name + "_0003.nii.gz"))
 
             copy_BraTS_segmentation_and_convert_labels(seg, join(target_labelsTr, patient_name + ".nii.gz"))
 
@@ -148,10 +149,10 @@ if __name__ == "__main__":
             isfile(flair),
         ]), "%s" % patient_name
 
-        shutil.copy(t1, join(target_imagesVal, patient_name + "_0000.nii.gz"))
-        shutil.copy(t1c, join(target_imagesVal, patient_name + "_0001.nii.gz"))
-        shutil.copy(t2, join(target_imagesVal, patient_name + "_0002.nii.gz"))
-        shutil.copy(flair, join(target_imagesVal, patient_name + "_0003.nii.gz"))
+        shutil_sol.copyfile(t1, join(target_imagesVal, patient_name + "_0000.nii.gz"))
+        shutil_sol.copyfile(t1c, join(target_imagesVal, patient_name + "_0001.nii.gz"))
+        shutil_sol.copyfile(t2, join(target_imagesVal, patient_name + "_0002.nii.gz"))
+        shutil_sol.copyfile(flair, join(target_imagesVal, patient_name + "_0003.nii.gz"))
 
     downloaded_data_dir = "/home/fabian/Downloads/BraTS2018_train_val_test_data/MICCAI_BraTS_2018_Data_Testing_FIsensee"
 
@@ -170,7 +171,7 @@ if __name__ == "__main__":
             isfile(flair),
         ]), "%s" % patient_name
 
-        shutil.copy(t1, join(target_imagesTs, patient_name + "_0000.nii.gz"))
-        shutil.copy(t1c, join(target_imagesTs, patient_name + "_0001.nii.gz"))
-        shutil.copy(t2, join(target_imagesTs, patient_name + "_0002.nii.gz"))
-        shutil.copy(flair, join(target_imagesTs, patient_name + "_0003.nii.gz"))
+        shutil_sol.copyfile(t1, join(target_imagesTs, patient_name + "_0000.nii.gz"))
+        shutil_sol.copyfile(t1c, join(target_imagesTs, patient_name + "_0001.nii.gz"))
+        shutil_sol.copyfile(t2, join(target_imagesTs, patient_name + "_0002.nii.gz"))
+        shutil_sol.copyfile(flair, join(target_imagesTs, patient_name + "_0003.nii.gz"))
