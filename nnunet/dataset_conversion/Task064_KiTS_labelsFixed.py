@@ -14,6 +14,7 @@
 
 
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from batchgenerators.utilities.file_and_folder_operations import *
 from nnunet.paths import nnUNet_raw_data
 
@@ -49,14 +50,14 @@ if __name__ == "__main__":
         curr = join(base, p)
         label_file = join(curr, "segmentation.nii.gz")
         image_file = join(curr, "imaging.nii.gz")
-        shutil.copy(image_file, join(imagestr, p + "_0000.nii.gz"))
-        shutil.copy(label_file, join(labelstr, p + ".nii.gz"))
+        shutil_sol.copyfile(image_file, join(imagestr, p + "_0000.nii.gz"))
+        shutil_sol.copyfile(label_file, join(labelstr, p + ".nii.gz"))
         train_patient_names.append(p)
 
     for p in test_patients:
         curr = join(base, p)
         image_file = join(curr, "imaging.nii.gz")
-        shutil.copy(image_file, join(imagests, p + "_0000.nii.gz"))
+        shutil_sol.copyfile(image_file, join(imagests, p + "_0000.nii.gz"))
         test_patient_names.append(p)
 
     json_dict = {}

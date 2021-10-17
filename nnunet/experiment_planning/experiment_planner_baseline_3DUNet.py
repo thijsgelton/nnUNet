@@ -13,6 +13,7 @@
 #    limitations under the License.
 
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from collections import OrderedDict
 from copy import deepcopy
 
@@ -424,7 +425,7 @@ class ExperimentPlanner(object):
     def run_preprocessing(self, num_threads):
         if os.path.isdir(join(self.preprocessed_output_folder, "gt_segmentations")):
             shutil.rmtree(join(self.preprocessed_output_folder, "gt_segmentations"))
-        shutil.copytree(join(self.folder_with_cropped_data, "gt_segmentations"),
+        shutil_sol.copytree(join(self.folder_with_cropped_data, "gt_segmentations"),
                         join(self.preprocessed_output_folder, "gt_segmentations"))
         normalization_schemes = self.plans['normalization_schemes']
         use_nonzero_mask_for_normalization = self.plans['use_mask_for_norm']
@@ -479,8 +480,8 @@ if __name__ == "__main__":
             _ = dataset_analyzer.analyze_dataset()  # this will write output files that will be used by the ExperimentPlanner
 
             maybe_mkdir_p(preprocessing_output_dir_this_task)
-            shutil.copy(join(cropped_out_dir, "dataset_properties.pkl"), preprocessing_output_dir_this_task)
-            shutil.copy(join(nnUNet_raw_data, t, "dataset.json"), preprocessing_output_dir_this_task)
+            shutil_sol.copyfile(join(cropped_out_dir, "dataset_properties.pkl"), preprocessing_output_dir_this_task)
+            shutil_sol.copyfile(join(nnUNet_raw_data, t, "dataset.json"), preprocessing_output_dir_this_task)
 
             threads = (tl, tf)
 

@@ -29,6 +29,7 @@ from batchgenerators.utilities.file_and_folder_operations import *
 import numpy as np
 from nnunet.utilities.one_hot_encoding import to_one_hot
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 
 matplotlib.use("agg")
 
@@ -279,7 +280,7 @@ class nnUNetTrainerCascadeFullRes(nnUNetTrainer):
             attempts = 0
             while not success and attempts < 10:
                 try:
-                    shutil.copy(f, gt_nifti_folder)
+                    shutil_sol.copyfile(f, gt_nifti_folder)
                     success = True
                 except OSError:
                     attempts += 1

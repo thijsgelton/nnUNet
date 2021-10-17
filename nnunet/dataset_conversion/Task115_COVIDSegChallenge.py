@@ -12,6 +12,7 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 import subprocess
 
 import SimpleITK as sitk
@@ -37,7 +38,7 @@ def prepare_submission(folder_in, folder_out):
     maybe_mkdir_p(folder_out)
     for n in nii:
         i = n.split('-')[-1][:-10]
-        shutil.copy(join(folder_in, n), join(folder_out, i + '.nii.gz'))
+        shutil_sol.copyfile(join(folder_in, n), join(folder_out, i + '.nii.gz'))
 
 
 def get_ids_from_folder(folder):
@@ -301,15 +302,15 @@ if __name__ == '__main__':
         if not isfile(seg_file):
             seg_file = join(train_orig, c + '_seg.nii.gz')
 
-        shutil.copy(data_file, join(target_imagesTr, c + "_0000.nii.gz"))
-        shutil.copy(seg_file, join(target_labelsTr, c + '.nii.gz'))
+        shutil_sol.copyfile(data_file, join(target_imagesTr, c + "_0000.nii.gz"))
+        shutil_sol.copyfile(seg_file, join(target_labelsTr, c + '.nii.gz'))
 
     val_orig = join(downloaded_data_dir, "Validation")
     cases = [i[:-10] for i in subfiles(val_orig, suffix='_ct.nii.gz', join=False)]
     for c in cases:
         data_file = join(val_orig, c + '_ct.nii.gz')
 
-        shutil.copy(data_file, join(target_imagesVal, c + "_0000.nii.gz"))
+        shutil_sol.copyfile(data_file, join(target_imagesVal, c + "_0000.nii.gz"))
 
     generate_dataset_json(
         join(target_base, 'dataset.json'),

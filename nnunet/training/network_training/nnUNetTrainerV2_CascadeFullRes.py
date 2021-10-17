@@ -30,6 +30,7 @@ from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
 from nnunet.training.network_training.nnUNetTrainerV2 import nnUNetTrainerV2
 from nnunet.utilities.one_hot_encoding import to_one_hot
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 
 from torch import nn
 
@@ -338,7 +339,7 @@ class nnUNetTrainerV2CascadeFullRes(nnUNetTrainerV2):
             e = None
             while not success and attempts < 10:
                 try:
-                    shutil.copy(f, gt_nifti_folder)
+                    shutil_sol.copyfile(f, gt_nifti_folder)
                     success = True
                 except OSError as e:
                     attempts += 1

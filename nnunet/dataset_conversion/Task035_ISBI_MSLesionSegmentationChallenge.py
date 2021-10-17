@@ -13,6 +13,7 @@
 #    limitations under the License.
 
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from collections import OrderedDict
 import numpy as np
 import SimpleITK as sitk
@@ -90,7 +91,7 @@ if __name__ == "__main__":
             for f in fnames_original:
                 for mask in [1, 2]:
                     fname_target = f[:-12] + "__mask%d" % mask + f[-12:]
-                    shutil.copy(f, fname_target)
+                    shutil_sol.copyfile(f, fname_target)
                 os.remove(f)
 
 

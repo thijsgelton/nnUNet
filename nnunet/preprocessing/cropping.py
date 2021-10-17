@@ -15,6 +15,7 @@
 import SimpleITK as sitk
 import numpy as np
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from batchgenerators.utilities.file_and_folder_operations import *
 from multiprocessing import Pool
 from collections import OrderedDict
@@ -194,7 +195,7 @@ class ImageCropper(object):
         maybe_mkdir_p(output_folder_gt)
         for j, case in enumerate(list_of_files):
             if case[-1] is not None:
-                shutil.copy(case[-1], output_folder_gt)
+                shutil_sol.copyfile(case[-1], output_folder_gt)
 
         list_of_args = []
         for j, case in enumerate(list_of_files):

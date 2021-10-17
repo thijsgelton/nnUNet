@@ -17,6 +17,7 @@ from collections import OrderedDict
 from nnunet.paths import nnUNet_raw_data
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 
 
 if __name__ == "__main__":
@@ -47,8 +48,8 @@ if __name__ == "__main__":
         train_patient_name = f'{prefix}_{serial_number:03d}.nii.gz'
         label_file = join(label_folder, f'label{p[3:]}')
         image_file = join(train_folder, p)
-        shutil.copy(image_file, join(imagestr, f'{train_patient_name[:7]}_0000.nii.gz'))
-        shutil.copy(label_file, join(labelstr, train_patient_name))
+        shutil_sol.copyfile(image_file, join(imagestr, f'{train_patient_name[:7]}_0000.nii.gz'))
+        shutil_sol.copyfile(label_file, join(labelstr, train_patient_name))
         train_patient_names.append(train_patient_name)
 
     test_patients = subfiles(test_folder, join=False, suffix=".nii.gz")
@@ -57,7 +58,7 @@ if __name__ == "__main__":
         image_file = join(test_folder, p + ".nii.gz")
         serial_number = int(p[3:7])
         test_patient_name = f'{prefix}_{serial_number:03d}.nii.gz'
-        shutil.copy(image_file, join(imagests, f'{test_patient_name[:7]}_0000.nii.gz'))
+        shutil_sol.copyfile(image_file, join(imagests, f'{test_patient_name[:7]}_0000.nii.gz'))
         test_patient_names.append(test_patient_name)
 
     json_dict = OrderedDict()

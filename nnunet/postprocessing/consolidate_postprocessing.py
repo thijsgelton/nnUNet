@@ -13,6 +13,7 @@
 #    limitations under the License.
 
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from typing import Tuple
 
 from batchgenerators.utilities.file_and_folder_operations import *
@@ -37,7 +38,7 @@ def collect_cv_niftis(cv_folder: str, output_folder: str, validation_folder_name
     for f in folds:
         niftis = subfiles(validation_raw_folders[f], suffix=".nii.gz")
         for n in niftis:
-            shutil.copy(n, join(output_folder))
+            shutil_sol.copyfile(n, join(output_folder))
 
 
 def consolidate_folds(output_folder_base, validation_folder_name: str = 'validation_raw',

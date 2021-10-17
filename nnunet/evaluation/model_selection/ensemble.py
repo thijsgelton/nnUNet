@@ -12,6 +12,7 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from multiprocessing.pool import Pool
 
 import numpy as np
@@ -119,5 +120,5 @@ def ensemble(training_output_folder1, training_output_folder2, output_folder, ta
         save_json(json_out, join(output_folder_base, "ensembled_postprocessed", "summary.json"))
 
         maybe_mkdir_p(out_dir_all_json)
-        shutil.copy(join(output_folder_base, "ensembled_postprocessed", "summary.json"),
+        shutil_sol.copyfile(join(output_folder_base, "ensembled_postprocessed", "summary.json"),
                     join(out_dir_all_json, "%s__%s.json" % (task, output_folder_base.split("/")[-1])))

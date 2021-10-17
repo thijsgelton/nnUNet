@@ -28,6 +28,7 @@ from nnunet.evaluation.region_based_evaluation import get_brats_regions, evaluat
 from nnunet.paths import nnUNet_raw_data
 import SimpleITK as sitk
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from medpy.metric import dc, hd95
 
 from nnunet.postprocessing.consolidate_postprocessing import collect_cv_niftis
@@ -665,10 +666,10 @@ if __name__ == "__main__":
             isfile(seg)
         ]), "%s" % patient_name
 
-        shutil.copy(t1, join(target_imagesTr, patient_name + "_0000.nii.gz"))
-        shutil.copy(t1c, join(target_imagesTr, patient_name + "_0001.nii.gz"))
-        shutil.copy(t2, join(target_imagesTr, patient_name + "_0002.nii.gz"))
-        shutil.copy(flair, join(target_imagesTr, patient_name + "_0003.nii.gz"))
+        shutil_sol.copyfile(t1, join(target_imagesTr, patient_name + "_0000.nii.gz"))
+        shutil_sol.copyfile(t1c, join(target_imagesTr, patient_name + "_0001.nii.gz"))
+        shutil_sol.copyfile(t2, join(target_imagesTr, patient_name + "_0002.nii.gz"))
+        shutil_sol.copyfile(flair, join(target_imagesTr, patient_name + "_0003.nii.gz"))
 
         copy_BraTS_segmentation_and_convert_labels(seg, join(target_labelsTr, patient_name + ".nii.gz"))
 
@@ -716,10 +717,10 @@ if __name__ == "__main__":
                 isfile(flair),
             ]), "%s" % patient_name
 
-            shutil.copy(t1, join(target_imagesVal, patient_name + "_0000.nii.gz"))
-            shutil.copy(t1c, join(target_imagesVal, patient_name + "_0001.nii.gz"))
-            shutil.copy(t2, join(target_imagesVal, patient_name + "_0002.nii.gz"))
-            shutil.copy(flair, join(target_imagesVal, patient_name + "_0003.nii.gz"))
+            shutil_sol.copyfile(t1, join(target_imagesVal, patient_name + "_0000.nii.gz"))
+            shutil_sol.copyfile(t1c, join(target_imagesVal, patient_name + "_0001.nii.gz"))
+            shutil_sol.copyfile(t2, join(target_imagesVal, patient_name + "_0002.nii.gz"))
+            shutil_sol.copyfile(flair, join(target_imagesVal, patient_name + "_0003.nii.gz"))
 
 
     downloaded_data_dir_test = "/home/fabian/Downloads/MICCAI_BraTS2020_TestingData"
@@ -740,10 +741,10 @@ if __name__ == "__main__":
                 isfile(flair),
             ]), "%s" % patient_name
 
-            shutil.copy(t1, join(target_imagesTs, patient_name + "_0000.nii.gz"))
-            shutil.copy(t1c, join(target_imagesTs, patient_name + "_0001.nii.gz"))
-            shutil.copy(t2, join(target_imagesTs, patient_name + "_0002.nii.gz"))
-            shutil.copy(flair, join(target_imagesTs, patient_name + "_0003.nii.gz"))
+            shutil_sol.copyfile(t1, join(target_imagesTs, patient_name + "_0000.nii.gz"))
+            shutil_sol.copyfile(t1c, join(target_imagesTs, patient_name + "_0001.nii.gz"))
+            shutil_sol.copyfile(t2, join(target_imagesTs, patient_name + "_0002.nii.gz"))
+            shutil_sol.copyfile(flair, join(target_imagesTs, patient_name + "_0003.nii.gz"))
 
     # test set
     #  nnUNet_ensemble -f nnUNetTrainerV2BraTSRegions_DA3_BN_BD__nnUNetPlansv2.1_bs5_5fold nnUNetTrainerV2BraTSRegions_DA4_BN_BD__nnUNetPlansv2.1_bs5_5fold nnUNetTrainerV2BraTSRegions_DA4_BN__nnUNetPlansv2.1_bs5_15fold -o ensembled_nnUNetTrainerV2BraTSRegions_DA3_BN_BD__nnUNetPlansv2.1_bs5_5fold__nnUNetTrainerV2BraTSRegions_DA4_BN_BD__nnUNetPlansv2.1_bs5_5fold__nnUNetTrainerV2BraTSRegions_DA4_BN__nnUNetPlansv2.1_bs5_15fold

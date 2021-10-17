@@ -17,6 +17,7 @@ from collections import OrderedDict
 from nnunet.paths import nnUNet_raw_data
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 import SimpleITK as sitk
 
 
@@ -59,8 +60,8 @@ if __name__ == "__main__":
         curr = join(base, "train", p)
         label_file = join(curr, "GT.nii.gz")
         image_file = join(curr, p + ".nii.gz")
-        shutil.copy(image_file, join(imagestr, p + "_0000.nii.gz"))
-        shutil.copy(label_file, join(labelstr, p + ".nii.gz"))
+        shutil_sol.copyfile(image_file, join(imagestr, p + "_0000.nii.gz"))
+        shutil_sol.copyfile(label_file, join(labelstr, p + ".nii.gz"))
         train_patient_names.append(p)
 
     test_patients = subfiles(join(base, "test"), join=False, suffix=".nii.gz")
@@ -68,7 +69,7 @@ if __name__ == "__main__":
         p = p[:-7]
         curr = join(base, "test")
         image_file = join(curr, p + ".nii.gz")
-        shutil.copy(image_file, join(imagests, p + "_0000.nii.gz"))
+        shutil_sol.copyfile(image_file, join(imagests, p + "_0000.nii.gz"))
         test_patient_names.append(p)
 
 

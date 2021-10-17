@@ -15,6 +15,7 @@
 from collections import OrderedDict
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 import numpy as np
 from numpy.random.mtrand import RandomState
 import subprocess
@@ -84,8 +85,8 @@ def select_annotated_frames_mms(data_folder, out_folder, add_zeros=False, mode='
             filename_es = generate_filename_for_nnunet(pat_id=idx, ts=es, pat_folder=out_folder,
                                                        vendor=vendor, centre=centre, add_zeros=add_zeros, mode=mode)
 
-            shutil.copy(filename_ed_original, filename_ed)
-            shutil.copy(filename_es_original, filename_es)
+            shutil_sol.copyfile(filename_ed_original, filename_ed)
+            shutil_sol.copyfile(filename_es_original, filename_es)
 
 
 def create_custom_splits_for_experiments(task_path):

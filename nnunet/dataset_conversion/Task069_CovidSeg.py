@@ -1,4 +1,5 @@
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 
 from batchgenerators.utilities.file_and_folder_operations import *
 import SimpleITK as sitk
@@ -38,7 +39,7 @@ if __name__ == '__main__':
         sitk.WriteImage(sitk.GetImageFromArray(labels), join(labelstr, this_name + '.nii.gz'))
         train_patient_names.append(this_name)
 
-    shutil.copy(join(download_dir, 'val_im.nii.gz'), join(imagests, 'val_im.nii.gz'))
+    shutil_sol.copyfile(join(download_dir, 'val_im.nii.gz'), join(imagests, 'val_im.nii.gz'))
 
     test_patient_names.append('val_im')
 

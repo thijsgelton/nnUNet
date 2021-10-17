@@ -19,6 +19,7 @@ from nnunet.experiment_planning.DatasetAnalyzer import DatasetAnalyzer
 from nnunet.experiment_planning.utils import crop
 from nnunet.paths import *
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from nnunet.utilities.task_name_id_conversion import convert_id_to_task_name
 from nnunet.preprocessing.sanity_checks import verify_dataset_integrity
 from nnunet.training.model_restore import recursive_find_python_class
@@ -142,8 +143,8 @@ def main():
 
 
         maybe_mkdir_p(preprocessing_output_dir_this_task)
-        shutil.copy(join(cropped_out_dir, "dataset_properties.pkl"), preprocessing_output_dir_this_task)
-        shutil.copy(join(nnUNet_raw_data, t, "dataset.json"), preprocessing_output_dir_this_task)
+        shutil_sol.copyfile(join(cropped_out_dir, "dataset_properties.pkl"), preprocessing_output_dir_this_task)
+        shutil_sol.copyfile(join(nnUNet_raw_data, t, "dataset.json"), preprocessing_output_dir_this_task)
 
         threads = (tl, tf)
 

@@ -13,6 +13,7 @@
 #    limitations under the License.
 
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from multiprocessing import Pool
 
 import SimpleITK as sitk
@@ -246,7 +247,7 @@ if __name__ == "__main__":
     full_taskname = 'Task%03.0d_' % task_id + task_name
     output_raw = join(nnUNet_raw_data, full_taskname)
     shutil.rmtree(output_raw)
-    shutil.copytree(join(nnUNet_raw_data, 'Task999_Fluo-N2DH-SIM_thickborder'), output_raw)
+    shutil_sol.copytree(join(nnUNet_raw_data, 'Task999_Fluo-N2DH-SIM_thickborder'), output_raw)
 
     shutil.rmtree(join(nnUNet_raw_data, 'Task999_Fluo-N2DH-SIM_thickborder'))
 
@@ -271,7 +272,7 @@ if __name__ == "__main__":
                         sitk.WriteImage(empty, join(curr, i.replace("_0000", "_%04.0d" % (
                                     additional_time_steps + previous_timestep))))
                     else:
-                        shutil.copy(expected_filename, join(curr, i.replace("_0000", "_%04.0d" % (
+                        shutil_sol.copyfile(expected_filename, join(curr, i.replace("_0000", "_%04.0d" % (
                                     additional_time_steps + previous_timestep))))
     dataset = load_json(join(output_raw, 'dataset.json'))
     dataset['modality'] = {

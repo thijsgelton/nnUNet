@@ -25,6 +25,7 @@ from multiprocessing import Process, Queue
 import torch
 import SimpleITK as sitk
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from multiprocessing import Pool
 from nnunet.postprocessing.connected_components import load_remove_save, load_postprocessing
 from nnunet.training.model_restore import load_model_and_checkpoint_files
@@ -274,7 +275,7 @@ def predict_cases(model, list_of_lists, output_filenames, folds, save_npz, num_t
         pp_file = join(model, "postprocessing.json")
         if isfile(pp_file):
             print("postprocessing...")
-            shutil.copy(pp_file, os.path.abspath(os.path.dirname(output_filenames[0])))
+            shutil_sol.copyfile(pp_file, os.path.abspath(os.path.dirname(output_filenames[0])))
             # for_which_classes stores for which of the classes everything but the largest connected component needs to be
             # removed
             for_which_classes, min_valid_obj_size = load_postprocessing(pp_file)
@@ -422,7 +423,7 @@ def predict_cases_fast(model, list_of_lists, output_filenames, folds, num_thread
         pp_file = join(model, "postprocessing.json")
         if isfile(pp_file):
             print("postprocessing...")
-            shutil.copy(pp_file, os.path.dirname(output_filenames[0]))
+            shutil_sol.copyfile(pp_file, os.path.dirname(output_filenames[0]))
             # for_which_classes stores for which of the classes everything but the largest connected component needs to be
             # removed
             for_which_classes, min_valid_obj_size = load_postprocessing(pp_file)
@@ -547,7 +548,7 @@ def predict_cases_fastest(model, list_of_lists, output_filenames, folds, num_thr
         pp_file = join(model, "postprocessing.json")
         if isfile(pp_file):
             print("postprocessing...")
-            shutil.copy(pp_file, os.path.dirname(output_filenames[0]))
+            shutil_sol.copyfile(pp_file, os.path.dirname(output_filenames[0]))
             # for_which_classes stores for which of the classes everything but the largest connected component needs to be
             # removed
             for_which_classes, min_valid_obj_size = load_postprocessing(pp_file)
@@ -627,7 +628,7 @@ def predict_from_folder(model: str, input_folder: str, output_folder: str, folds
     :return:
     """
     maybe_mkdir_p(output_folder)
-    shutil.copy(join(model, 'plans.pkl'), output_folder)
+    shutil_sol.copyfile(join(model, 'plans.pkl'), output_folder)
 
     assert isfile(join(model, "plans.pkl")), "Folder with saved model weights must contain a plans.pkl file"
     expected_num_modalities = load_pickle(join(model, "plans.pkl"))['num_modalities']

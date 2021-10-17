@@ -14,6 +14,7 @@
 
 
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from copy import deepcopy
 
 from nnunet.inference.segmentation_export import save_segmentation_nifti_from_softmax
@@ -92,7 +93,7 @@ def merge(folders, output_folder, threads, override=True, postprocessing_file=No
         print('Postprocessing...')
         apply_postprocessing_to_folder(output_folder, output_folder_orig,
                                        for_which_classes, min_valid_obj_size, threads)
-        shutil.copy(postprocessing_file, output_folder_orig)
+        shutil_sol.copyfile(postprocessing_file, output_folder_orig)
 
 
 def main():

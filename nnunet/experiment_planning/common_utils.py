@@ -17,6 +17,7 @@ from copy import deepcopy
 from nnunet.network_architecture.generic_UNet import Generic_UNet
 import SimpleITK as sitk
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from batchgenerators.utilities.file_and_folder_operations import join
 
 
@@ -25,7 +26,7 @@ def split_4d_nifti(filename, output_folder):
     dim = img_itk.GetDimension()
     file_base = filename.split("/")[-1]
     if dim == 3:
-        shutil.copy(filename, join(output_folder, file_base[:-7] + "_0000.nii.gz"))
+        shutil_sol.copyfile(filename, join(output_folder, file_base[:-7] + "_0000.nii.gz"))
         return
     elif dim != 4:
         raise RuntimeError("Unexpected dimensionality: %d of file %s, cannot split" % (dim, filename))

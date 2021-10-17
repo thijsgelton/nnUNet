@@ -16,6 +16,7 @@ import json
 import os
 import pickle
 import shutil
+import nnunet.utilities.shutil_sol as shutil_sol
 from collections import OrderedDict
 from multiprocessing import Pool
 
@@ -70,13 +71,13 @@ def split_4d(input_folder, num_processes=default_num_threads, overwrite_task_out
             files.append(n)
             output_dirs.append(curr_out_dir)
 
-    shutil.copytree(join(input_folder, "labelsTr"), join(output_folder, "labelsTr"))
+    shutil_sol.copytree(join(input_folder, "labelsTr"), join(output_folder, "labelsTr"))
 
     p = Pool(num_processes)
     p.starmap(split_4d_nifti, zip(files, output_dirs))
     p.close()
     p.join()
-    shutil.copy(join(input_folder, "dataset.json"), output_folder)
+    shutil_sol.copyfile(join(input_folder, "dataset.json"), output_folder)
 
 
 def create_lists_from_splitted_dataset(base_folder_splitted):
@@ -132,7 +133,7 @@ def crop(task_string, override=False, num_threads=default_num_threads):
 
     imgcrop = ImageCropper(num_threads, cropped_out_dir)
     imgcrop.run_cropping(lists, overwrite_existing=override)
-    shutil.copy(join(nnUNet_raw_data, task_string, "dataset.json"), cropped_out_dir)
+    shutil_sol.copyfile(join(nnUNet_raw_data, task_string, "dataset.json"), cropped_out_dir)
 
 
 def analyze_dataset(task_string, override=False, collect_intensityproperties=True, num_processes=default_num_threads):
@@ -149,8 +150,8 @@ def plan_and_preprocess(task_string, processes_lowres=default_num_threads, proce
     cropped_out_dir = join(nnUNet_cropped_data, task_string)
     maybe_mkdir_p(preprocessing_output_dir_this_task_train)
 
-    shutil.copy(join(cropped_out_dir, "dataset_properties.pkl"), preprocessing_output_dir_this_task_train)
-    shutil.copy(join(nnUNet_raw_data, task_string, "dataset.json"), preprocessing_output_dir_this_task_train)
+    shutil_sol.copyfile(join(cropped_out_dir, "dataset_properties.pkl"), preprocessing_output_dir_this_task_train)
+    shutil_sol.copyfile(join(nnUNet_raw_data, task_string, "dataset.json"), preprocessing_output_dir_this_task_train)
 
     exp_planner = ExperimentPlanner(cropped_out_dir, preprocessing_output_dir_this_task_train)
     exp_planner.plan_experiment()
