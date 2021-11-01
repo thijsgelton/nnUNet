@@ -254,11 +254,11 @@ def predict_cases(model, list_of_lists, output_filenames, folds, save_npz, num_t
         filename or np.ndarray and will handle this automatically"""
 
         if use_alt_resampling:
-            results.append(save_segmentation_nifti_from_softmax(
+            save_segmentation_nifti_from_softmax(
                 softmax, output_filename, dct, interpolation_order, region_class_order,
                 None, None,
                 npz_file, None, force_separate_z, interpolation_order_z
-            ))
+            )
         else:
             bytes_per_voxel = 4
             if all_in_gpu:
