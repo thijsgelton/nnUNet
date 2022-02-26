@@ -480,4 +480,5 @@ def nnunet_evaluate_folder():
                                                                        "this case that would not gie any useful "
                                                                        "information.")
     args = parser.parse_args()
-    return evaluate_folder(args.ref, args.pred, args.l)
+    scores = evaluate_folder(args.ref, args.pred, args.l)
+    return 0 if len(scores["mean"]) > 0 else 1
