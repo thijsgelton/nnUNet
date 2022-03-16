@@ -11,9 +11,10 @@
 #    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
-
+from typing import List
 
 import torch
+
 from nnunet.training.loss_functions.TopK_loss import TopKLoss
 from nnunet.training.loss_functions.crossentropy import RobustCrossEntropyLoss
 from nnunet.utilities.nd_softmax import softmax_helper
@@ -69,7 +70,7 @@ class GDL(nn.Module):
         tp, fp, fn, _ = get_tp_fp_fn_tn(x, y_onehot, axes, loss_mask, self.square)
 
         # GDL weight computation, we use 1/V
-        volumes = sum_tensor(y_onehot, axes) + 1e-6 # add some eps to prevent div by zero
+        volumes = sum_tensor(y_onehot, axes) + 1e-6  # add some eps to prevent div by zero
 
         if self.square_volumes:
             volumes = volumes ** 2
@@ -183,6 +184,42 @@ class SoftDiceLoss(nn.Module):
         denominator = 2 * tp + fp + fn + self.smooth
 
         dc = nominator / (denominator + 1e-8)
+
+        if not self.do_bg:
+            if self.batch_dice:
+                dc = dc[1:]
+            else:
+                dc = dc[:, 1:]
+        dc = dc.mean()
+
+        return -dc
+
+
+class SoftDiceLossWeighted(SoftDiceLoss):
+
+    def __init__(self, class_weights, *args, **kwargs):
+        super(SoftDiceLossWeighted, self).__init__(*args, **kwargs['soft_dice_kwargs'])
+        assert class_weights is not None, "Should supply class weights for this loss!"
+        self.class_weights = class_weights
+
+    def forward(self, x, y, loss_mask=None):
+        shp_x = x.shape
+
+        if self.batch_dice:
+            axes = [0] + list(range(2, len(shp_x)))
+        else:
+            axes = list(range(2, len(shp_x)))
+
+        if self.apply_nonlin is not None:
+            x = self.apply_nonlin(x)
+
+        tp, fp, fn, _ = get_tp_fp_fn_tn(x, y, axes, loss_mask, False)
+
+        nominator = 2 * tp + self.smooth
+        denominator = 2 * tp + fp + fn + self.smooth
+
+        dc = nominator / (denominator + 1e-8)
+        # dc *= self.class_weights
 
         if not self.do_bg:
             if self.batch_dice:
@@ -357,7 +394,7 @@ class DC_and_CE_loss(nn.Module):
         if self.aggregate == "sum":
             result = self.weight_ce * ce_loss + self.weight_dice * dc_loss
         else:
-            raise NotImplementedError("nah son") # reserved for other stuff (later)
+            raise NotImplementedError("nah son")  # reserved for other stuff (later)
         return result
 
 
@@ -384,7 +421,7 @@ class DC_and_BCE_loss(nn.Module):
         if self.aggregate == "sum":
             result = ce_loss + dc_loss
         else:
-            raise NotImplementedError("nah son") # reserved for other stuff (later)
+            raise NotImplementedError("nah son")  # reserved for other stuff (later)
 
         return result
 
@@ -402,7 +439,7 @@ class GDL_and_CE_loss(nn.Module):
         if self.aggregate == "sum":
             result = ce_loss + dc_loss
         else:
-            raise NotImplementedError("nah son") # reserved for other stuff (later)
+            raise NotImplementedError("nah son")  # reserved for other stuff (later)
         return result
 
 
@@ -422,5 +459,22 @@ class DC_and_topk_loss(nn.Module):
         if self.aggregate == "sum":
             result = ce_loss + dc_loss
         else:
-            raise NotImplementedError("nah son") # reserved for other stuff (later?)
+            raise NotImplementedError("nah son")  # reserved for other stuff (later?)
         return result
+
+
+class DCandCEWeightedLoss(DC_and_CE_loss):
+
+    def __init__(self, class_weights: List[float], weight_dc, weight_ce, soft_dice_kwargs, ce_kwargs):
+        """
+        Weighted version of the DC and CE loss combination.
+        """
+        super(DCandCEWeightedLoss, self).__init__(soft_dice_kwargs, ce_kwargs, weight_dice=weight_dc,
+                                                  weight_ce=weight_ce)
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.class_weights = self.to_tensor(np.array(class_weights))
+        self.dc = SoftDiceLoss(apply_nonlin=softmax_helper, **soft_dice_kwargs)
+        self.ce = RobustCrossEntropyLoss(weight=self.class_weights, **ce_kwargs)
+
+    def to_tensor(self, array):
+        return torch.tensor(array, dtype=torch.float32, device=self.device)
