@@ -11,7 +11,7 @@
 #    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
-
+from pprint import pprint
 
 from nnunet.training.loss_functions.dice_loss import DCandCEWeightedLoss
 from nnunet.training.network_training.nnUNetTrainerV2 import nnUNetTrainerV2
@@ -23,6 +23,7 @@ class nnUNetTrainer_V2_Loss_CEandDice_Weighted(nnUNetTrainerV2):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
         self.loss = DCandCEWeightedLoss(
+            ignore_label=kwargs.get('ignore_label', None),
             class_weights=kwargs.get('class_weights', []),
             weight_dc=kwargs.get('weight_dc', 1),
             weight_ce=kwargs.get('weight_ce', 1),
@@ -30,3 +31,4 @@ class nnUNetTrainer_V2_Loss_CEandDice_Weighted(nnUNetTrainerV2):
                                                              'do_bg': False}),
             ce_kwargs=kwargs.get("ce_kwargs", {})
         )
+        print(f"Using DCandCEWeightedLoss with the following parameters:\n {pprint(kwargs)}")
