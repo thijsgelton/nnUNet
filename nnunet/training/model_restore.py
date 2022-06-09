@@ -118,12 +118,15 @@ def load_model_and_checkpoint_files(folder, folds=None, mixed_precision=None, ch
     :param mixed_precision: if None then we take no action. If True/False we overwrite what the model has in its init
     :return:
     """
+    default_fold = 0
     if isinstance(folds, str):
         folds = [join(folder, "all")]
+        default_fold = "all"
         assert isdir(folds[0]), "no output folder for fold %s found" % folds
     elif isinstance(folds, (list, tuple)):
         if len(folds) == 1 and folds[0] == "all":
             folds = [join(folder, "all")]
+            default_fold = "all"
         else:
             folds = [join(folder, "fold_%d" % i) for i in folds]
         assert all([isdir(i) for i in folds]), "list of folds specified but not all output folders are present"
@@ -140,7 +143,7 @@ def load_model_and_checkpoint_files(folder, folds=None, mixed_precision=None, ch
     trainer = restore_model(join(folds[0], "%s.model.pkl" % checkpoint_name), fp16=mixed_precision)
     trainer.output_folder = folder
     trainer.output_folder_base = folder
-    trainer.update_fold(0)
+    trainer.update_fold(default_fold)
     trainer.initialize(False)
     all_best_model_files = [join(i, "%s.model" % checkpoint_name) for i in folds]
     print("using the following model files: ", all_best_model_files)
