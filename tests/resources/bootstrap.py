@@ -18,7 +18,7 @@ from nnunet.experiment_planning.nnUNet_convert_decathlon_task import (
 from nnunet.inference.pretrained_models.download_pretrained_model import (
     download_and_install_pretrained_model_by_name,
 )
-
+from nnunet.utilities.diag.generate_unet_weightmaps import generate_unet_weightmaps, get_classes_from_dataset_file
 
 RESOURCES_DIR = Path(__file__).parent
 PREPROCESSED_DATA_DIR = RESOURCES_DIR / "nnUNet" / "nnUNet_preprocessed_data"
@@ -28,6 +28,7 @@ DECATHLON_TASK04_HIPPOCAMPUS_DIR = TEST_INPUT_DATA_DIR / "Task04_Hippocampus"
 NNUNET_RAW_DATA_DIR = RESOURCES_DIR / "nnUNet" / "nnUNet_raw_data"
 NNUNET_CROPPED_DATA_DIR = RESOURCES_DIR / "nnUNet" / "nnUNet_cropped_data"
 NNUNET_PREPROCESSING_DATA_DIR = RESOURCES_DIR / "nnUNet" / "nnUNet_preprocessed_data"
+HIPPOCAMPUS_TASK = "Task004_Hippocampus"
 
 
 @contextmanager
@@ -44,10 +45,10 @@ def suppress_stdout():
 def download_pretrained_models():
     print("  # downloading pretrained models")
     nnunet.inference.pretrained_models.download_pretrained_model.network_training_output_dir = str(
-        RESOURCES_DIR / "pretrained" / "Task004_Hippocampus"
+        RESOURCES_DIR / "pretrained" / HIPPOCAMPUS_TASK
     )
     with suppress_stdout():
-        download_and_install_pretrained_model_by_name("Task004_Hippocampus")
+        download_and_install_pretrained_model_by_name(HIPPOCAMPUS_TASK)
 
 
 def unpack_decathlon_hippocampus_dataset():
@@ -59,7 +60,7 @@ def unpack_decathlon_hippocampus_dataset():
 def create_dummy_task004_input_data():
     print("  # creating dummy task004 input data")
     SRC_DIR = TEST_INPUT_DATA_DIR / "Task04_Hippocampus" / "imagesTs"
-    TEST_DIR = TEST_INPUT_DATA_DIR / "Task004_Hippocampus"
+    TEST_DIR = TEST_INPUT_DATA_DIR / HIPPOCAMPUS_TASK
     TEST_IMGS_DIR = TEST_DIR / "imagesTs"
     TEST_DIR.mkdir(exist_ok=True)
     TEST_IMGS_DIR.mkdir(exist_ok=True)
@@ -93,12 +94,28 @@ def generate_cropped_and_preprocessed_files():
         plan_and_preprocess_main()
 
 
+def bootstrap_diag_weightmaps():
+    print("  # bootstrapping diag weightmaps for preprocessed files")
+    input_dir = NNUNET_PREPROCESSING_DATA_DIR / HIPPOCAMPUS_TASK / "nnUNetData_plans_v2.1_stage0"
+    with suppress_stdout():
+        classes = get_classes_from_dataset_file(input_dir=input_dir, background_label=0)
+        generate_unet_weightmaps(
+            input_dir=input_dir,
+            output_dir=input_dir,
+            matching_pattern="*.npz",
+            sigma=5.0,
+            w_0=10.0,
+            classes=classes,
+        )
+
+
 def bootstrap():
     download_pretrained_models()
     unpack_decathlon_hippocampus_dataset()
     create_dummy_task004_input_data()
     convert_decathlon_dataset_to_nnunet_format()
     generate_cropped_and_preprocessed_files()
+    bootstrap_diag_weightmaps()
 
 
 if __name__ == "__main__":

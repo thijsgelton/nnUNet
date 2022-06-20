@@ -105,6 +105,10 @@ def check_integrity():
         workdir=PREPROCESSED_DATA_DIR,
         md5file=PREPROCESSED_DATA_DIR / "Task004_Hippocampus_other.md5",
     )
+    check_if_ok_or_exit(
+        workdir=PREPROCESSED_DATA_DIR,
+        md5file=PREPROCESSED_DATA_DIR / "Task004_Hippocampus_weightmaps.md5",
+    )
 
 
 if __name__ == "__main__":
