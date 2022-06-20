@@ -1,5 +1,3 @@
-import numpy as np
-
 from batchgenerators.dataloading.multi_threaded_augmenter import MultiThreadedAugmenter
 from batchgenerators.transforms.abstract_transforms import Compose
 from batchgenerators.transforms.channel_selection_transforms import (
@@ -7,11 +5,11 @@ from batchgenerators.transforms.channel_selection_transforms import (
     SegChannelSelectionTransform,
 )
 from batchgenerators.transforms.color_transforms import (
+    GammaTransform,
     BrightnessMultiplicativeTransform,
-    ContrastAugmentationTransform,
     BrightnessTransform,
+    ContrastAugmentationTransform,
 )
-from batchgenerators.transforms.color_transforms import GammaTransform
 from batchgenerators.transforms.noise_transforms import (
     GaussianNoiseTransform,
     GaussianBlurTransform,
@@ -19,22 +17,29 @@ from batchgenerators.transforms.noise_transforms import (
 from batchgenerators.transforms.resample_transforms import (
     SimulateLowResolutionTransform,
 )
-from batchgenerators.transforms.spatial_transforms import (
-    MirrorTransform, SpatialTransform,
-)
+
 from batchgenerators.transforms.utility_transforms import (
+    RemoveLabelTransform,
     RenameTransform,
     NumpyToTensor,
 )
 
-from nnunet.training.data_augmentation.custom_transforms import (
-    Convert3DTo2DTransform,
-    Convert2DTo3DTransform,
-    MaskTransform,
-    ConvertSegmentationToRegionsTransform,
+# from batchgenerators.transforms.spatial_transforms import SpatialTransform, MirrorTransform --> converted to:
+from nnunet.training.data_augmentation.diag.transforms.spatial_transforms_weightmaps import (
+    SpatialTransformWithWeights,
+    MirrorTransformWithWeights,
 )
+from nnunet.training.data_augmentation.diag.transforms.custom_transforms import (
+    Convert2DTo3DTransformWithWeights,
+    Convert3DTo2DTransformWithWeights,
+)
+
 from nnunet.training.data_augmentation.default_data_augmentation import (
     default_3D_augmentation_params,
+)
+from nnunet.training.data_augmentation.custom_transforms import (
+    MaskTransform,
+    ConvertSegmentationToRegionsTransform,
 )
 from nnunet.training.data_augmentation.downsampling import (
     DownsampleSegForDSTransform3,
@@ -45,7 +50,6 @@ from nnunet.training.data_augmentation.pyramid_augmentations import (
     ApplyRandomBinaryOperatorTransform,
     RemoveRandomConnectedComponentFromOneHotEncodingTransform,
 )
-from nnunet.training.data_augmentation.diag.transforms.spatial_transforms_sparse import SparseSpatialTransform
 
 try:
     from batchgenerators.dataloading.nondet_multi_threaded_augmenter import (
@@ -55,7 +59,7 @@ except ImportError as ie:
     NonDetMultiThreadedAugmenter = None
 
 
-def get_moreDA_augmentation_sparse(
+def get_moreDA_augmentation_weightmaps(
     dataloader_train,
     dataloader_val,
     patch_size,
@@ -63,7 +67,7 @@ def get_moreDA_augmentation_sparse(
     border_val_seg=-1,
     seeds_train=None,
     seeds_val=None,
-    order_seg=1,
+    order_seg=0,
     order_data=3,
     deep_supervision_scales=None,
     soft_ds=False,
@@ -71,7 +75,6 @@ def get_moreDA_augmentation_sparse(
     pin_memory=True,
     regions=None,
     use_nondetMultiThreadedAugmenter: bool = False,
-    only_sample_from_annotated: bool = True,
 ):
     assert (
         params.get("mirror") is None
@@ -92,20 +95,16 @@ def get_moreDA_augmentation_sparse(
     # don't do color augmentations while in 2d mode with 3d data because the color channel is overloaded!!
     if params.get("dummy_2D") is not None and params.get("dummy_2D"):
         ignore_axes = (0,)
-        tr_transforms.append(Convert3DTo2DTransform())
+        tr_transforms.append(Convert3DTo2DTransformWithWeights())
         patch_size_spatial = patch_size[1:]
     else:
         patch_size_spatial = patch_size
         ignore_axes = None
 
-    # use special SparseSpatialTransform that doesn't sample from -1 (unlabeled) values
-    # Note: random_crop is always True if using SparseSpatialTransform,
-    # hence patch_center_dist_from_border is required and set to the recommended value...
-    spatial_tf_class = SparseSpatialTransform if only_sample_from_annotated else SpatialTransform
     tr_transforms.append(
-        spatial_tf_class(
+        SpatialTransformWithWeights(
             patch_size_spatial,
-            patch_center_dist_from_border=np.array(patch_size_spatial) // 2,  # recommended value
+            patch_center_dist_from_border=None,
             do_elastic_deform=params.get("do_elastic"),
             alpha=params.get("elastic_deform_alpha"),
             sigma=params.get("elastic_deform_sigma"),
@@ -121,6 +120,9 @@ def get_moreDA_augmentation_sparse(
             order_data=order_data,
             border_mode_seg="constant",
             border_cval_seg=border_val_seg,
+            border_mode_weightmap="constant",
+            border_cval_weightmap=0,
+            order_weightmap=1,
             order_seg=order_seg,
             random_crop=params.get("random_crop"),
             p_el_per_sample=params.get("p_eldef"),
@@ -133,9 +135,9 @@ def get_moreDA_augmentation_sparse(
     )
 
     if params.get("dummy_2D"):
-        tr_transforms.append(Convert2DTo3DTransform())
+        tr_transforms.append(Convert2DTo3DTransformWithWeights())
 
-    # we need to put the color augmentations after the dummy 2d part (if applicable). Otherwise the overloaded color
+    # we need to put the color augmentations after the dummy 2d part (if applicable). Otherwise, the overloaded color
     # channel gets in the way
     tr_transforms.append(GaussianNoiseTransform(p_per_sample=0.1))
     tr_transforms.append(
@@ -197,7 +199,7 @@ def get_moreDA_augmentation_sparse(
         )
 
     if params.get("do_mirror") or params.get("mirror"):
-        tr_transforms.append(MirrorTransform(params.get("mirror_axes")))
+        tr_transforms.append(MirrorTransformWithWeights(params.get("mirror_axes")))
 
     if params.get("mask_was_used_for_normalization") is not None:
         mask_was_used_for_normalization = params.get("mask_was_used_for_normalization")
@@ -207,9 +209,7 @@ def get_moreDA_augmentation_sparse(
             )
         )
 
-    # NOTE here we removed the RemoveLabelTransform to in
-    # NOTEDO also remove the clude the to ignore voxels...
-    # # tr_transforms.append(RemoveLabelTransform(-1, 0))
+    tr_transforms.append(RemoveLabelTransform(-1, 0))
 
     if params.get("move_last_seg_chanel_to_data") is not None and params.get(
         "move_last_seg_chanel_to_data"
@@ -271,11 +271,24 @@ def get_moreDA_augmentation_sparse(
         else:
             tr_transforms.append(
                 DownsampleSegForDSTransform2(
-                    deep_supervision_scales, 0, input_key="target", output_key="target"
+                    deep_supervision_scales,
+                    order=0,
+                    input_key="target",
+                    output_key="target",
+                    axes=None,
                 )
             )
+        tr_transforms.append(
+            DownsampleSegForDSTransform2(
+                ds_scales=deep_supervision_scales,
+                order=1,
+                input_key="weightmap",
+                output_key="weightmap",
+                axes=None,
+            )
+        )
 
-    tr_transforms.append(NumpyToTensor(["data", "target"], "float"))
+    tr_transforms.append(NumpyToTensor(["data", "target", "weightmap"], "float"))
     tr_transforms = Compose(tr_transforms)
 
     if use_nondetMultiThreadedAugmenter:
@@ -300,8 +313,7 @@ def get_moreDA_augmentation_sparse(
         )
 
     val_transforms = []
-    # NOTE also remove the RemoveLabelTransform for the validation data pipeline
-    # val_transforms.append(RemoveLabelTransform(-1, 0))
+    val_transforms.append(RemoveLabelTransform(-1, 0))
     if params.get("selected_data_channels") is not None:
         val_transforms.append(
             DataChannelSelectionTransform(params.get("selected_data_channels"))
@@ -338,11 +350,24 @@ def get_moreDA_augmentation_sparse(
         else:
             val_transforms.append(
                 DownsampleSegForDSTransform2(
-                    deep_supervision_scales, 0, input_key="target", output_key="target"
+                    deep_supervision_scales,
+                    order=0,
+                    input_key="target",
+                    output_key="target",
+                    axes=None,
                 )
             )
+    val_transforms.append(
+        DownsampleSegForDSTransform2(
+            ds_scales=deep_supervision_scales,
+            order=1,
+            input_key="weightmap",
+            output_key="weightmap",
+            axes=None,
+        )
+    )
 
-    val_transforms.append(NumpyToTensor(["data", "target"], "float"))
+    val_transforms.append(NumpyToTensor(["data", "target", "weightmap"], "float"))
     val_transforms = Compose(val_transforms)
 
     if use_nondetMultiThreadedAugmenter:
