@@ -149,7 +149,7 @@ def test_sparse_data_augmentation():
         seg_min: float = -1.0,
     ):
         assert data_dict[data_key].min() < -1.0
-        assert data_dict[data_key].max() > 6.0
+        assert data_dict[data_key].max() > 5.0
         assert data_dict[seg_key].min() == seg_min
         assert data_dict[seg_key].max() == 2.0
         assert all(
