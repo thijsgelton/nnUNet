@@ -19,6 +19,7 @@ import nnunet.utilities.shutil_sol as shutil_sol
 from batchgenerators.utilities.file_and_folder_operations import *
 from multiprocessing import Pool
 from collections import OrderedDict
+import multiresolutionimageinterface as mir
 
 
 def create_nonzero_mask(data):
@@ -33,24 +34,51 @@ def create_nonzero_mask(data):
 
 
 def get_bbox_from_mask(mask, outside_value=0):
-    mask_voxel_coords = np.where(mask != outside_value)
-    minzidx = int(np.min(mask_voxel_coords[0]))
-    maxzidx = int(np.max(mask_voxel_coords[0])) + 1
-    minxidx = int(np.min(mask_voxel_coords[1]))
-    maxxidx = int(np.max(mask_voxel_coords[1])) + 1
-    minyidx = int(np.min(mask_voxel_coords[2]))
-    maxyidx = int(np.max(mask_voxel_coords[2])) + 1
-    return [[minzidx, maxzidx], [minxidx, maxxidx], [minyidx, maxyidx]]
+
+    if len(mask.shape)==3:
+        print('Loaded a 3D image mask ')
+        mask_voxel_coords = np.where(mask != outside_value)
+        minzidx = int(np.min(mask_voxel_coords[0]))
+        maxzidx = int(np.max(mask_voxel_coords[0])) + 1
+        minxidx = int(np.min(mask_voxel_coords[1]))
+        maxxidx = int(np.max(mask_voxel_coords[1])) + 1
+        minyidx = int(np.min(mask_voxel_coords[2]))
+        maxyidx = int(np.max(mask_voxel_coords[2])) + 1
+        return [[minzidx, maxzidx], [minxidx, maxxidx], [minyidx, maxyidx]]
+    elif len(mask.shape)==2:
+        print('Loaded a 2D image mask ')
+        mask_voxel_coords = np.where(mask != outside_value)
+        minzidx = int(np.min(mask_voxel_coords[0]))
+        maxzidx = int(np.max(mask_voxel_coords[0])) + 1
+        minxidx = int(np.min(mask_voxel_coords[1]))
+        maxxidx = int(np.max(mask_voxel_coords[1])) + 1
+
+        return [[minzidx, maxzidx], [minxidx, maxxidx]]
+
+    else:
+        print('Unsupported # of dimentions =', len(mask.shape))
+        return None
+
 
 
 def crop_to_bbox(image, bbox):
-    assert len(image.shape) == 3, "only supports 3d images"
-    resizer = (slice(bbox[0][0], bbox[0][1]), slice(bbox[1][0], bbox[1][1]), slice(bbox[2][0], bbox[2][1]))
-    return image[resizer]
+    if len(image.shape)==3:
+        
+        resizer = (slice(bbox[0][0], bbox[0][1]), slice(bbox[1][0], bbox[1][1]), slice(bbox[2][0], bbox[2][1]))
+        return image[resizer]
+    elif len(image.shape)==2:
+
+        
+        resizer = (slice(bbox[0][0], bbox[0][1]), slice(bbox[1][0], bbox[1][1]))
+        return image[resizer]
+    else:
+        print('Unsupported # of dimentions =', len(image.shape))
+        return None
 
 
 def get_case_identifier(case):
-    case_identifier = case[0].split("/")[-1].split(".nii.gz")[0][:-5]
+    case_identifier = case[0].split("/")[-1].split(".tif")[0]#[:-5]
+    print('In get_case_identifier',case_identifier)
     return case_identifier
 
 
@@ -59,27 +87,34 @@ def get_case_identifier_from_npz(case):
     return case_identifier
 
 
-def load_case_from_list_of_files(data_files, seg_file=None):
+def load_case_from_list_of_files(data_files, seg_file=None,level=1):
     assert isinstance(data_files, list) or isinstance(data_files, tuple), "case must be either a list or a tuple"
     properties = OrderedDict()
-    data_itk = [sitk.ReadImage(f) for f in data_files]
+    # Create an image reader object
+    image_reader = mir.MultiResolutionImageReader()
+    [print('opening f:',f) for f in data_files]
+    data_itk = [image_reader.open(f) for f in data_files]
 
-    properties["original_size_of_raw_data"] = np.array(data_itk[0].GetSize())[[2, 1, 0]]
-    properties["original_spacing"] = np.array(data_itk[0].GetSpacing())[[2, 1, 0]]
+    properties["original_size_of_raw_data"] = np.array((1, data_itk[0].getLevelDimensions(level)[1], data_itk[0].getLevelDimensions(level)[0]))[[2, 1, 0]]
+    properties["original_spacing"] = np.array((999, 1, 1))[[2, 1, 0]] #data_itk[0].getSpacing()
     properties["list_of_data_files"] = data_files
     properties["seg_file"] = seg_file
 
-    properties["itk_origin"] = data_itk[0].GetOrigin()
-    properties["itk_spacing"] = data_itk[0].GetSpacing()
-    properties["itk_direction"] = data_itk[0].GetDirection()
+    properties["itk_origin"] = np.array((0,0,0))#data_itk[0].GetOrigin()
+    properties["itk_spacing"] = np.array((999, 1, 1))[[2, 1, 0]]
+    properties["itk_direction"] = np.array((0,0,0)) #data_itk[0].GetDirection()
+    print('Original_spacing:',properties["original_spacing"])
+    print('Original_size_of_raw_data:',properties["original_size_of_raw_data"])
 
-    data_npy = np.vstack([sitk.GetArrayFromImage(d)[None] for d in data_itk])
+    data_npy = np.vstack([np.expand_dims(np.moveaxis(d.getUCharPatch(0, 0, *d.getLevelDimensions(level), level),-1, 0), -1) for d in data_itk])
+    print('Loaded the numpy image stack, shape:',data_npy.shape)
     if seg_file is not None:
-        seg_itk = sitk.ReadImage(seg_file)
-        seg_npy = sitk.GetArrayFromImage(seg_itk)[None].astype(np.float32)
+        seg_itk = image_reader.open(seg_file)
+        seg_npy = np.expand_dims(np.moveaxis(seg_itk.getUCharPatch(0, 0, *seg_itk.getLevelDimensions(level), level),-1, 0), -1).astype(np.float32)
     else:
         seg_npy = None
-    return data_npy.astype(np.float32), seg_npy, properties
+    #print('Loaded the numpy mask stack, shape:',seg_npy.shape)
+    return data_npy, seg_npy, properties #.astype(np.float32)
 
 
 def crop_to_nonzero(data, seg=None, nonzero_label=-1):
@@ -90,6 +125,8 @@ def crop_to_nonzero(data, seg=None, nonzero_label=-1):
     :param nonzero_label: this will be written into the segmentation map
     :return:
     """
+    bbox = [[0, data.shape[1]], [0, data.shape[2]], [0, data.shape[3]]]
+    print('bbox shape:',bbox)
     nonzero_mask = create_nonzero_mask(data)
     bbox = get_bbox_from_mask(nonzero_mask, 0)
 
@@ -152,7 +189,7 @@ class ImageCropper(object):
 
     @staticmethod
     def crop_from_list_of_files(data_files, seg_file=None):
-        data, seg, properties = load_case_from_list_of_files(data_files, seg_file)
+        data, seg, properties = load_case_from_list_of_files(data_files, seg_file,)
         return ImageCropper.crop(data, properties, seg)
 
     def load_crop_save(self, case, case_identifier, overwrite_existing=False):
@@ -161,6 +198,7 @@ class ImageCropper(object):
             if overwrite_existing \
                     or (not os.path.isfile(os.path.join(self.output_folder, "%s.npz" % case_identifier))
                         or not os.path.isfile(os.path.join(self.output_folder, "%s.pkl" % case_identifier))):
+                print('case',case)
 
                 data, seg, properties = self.crop_from_list_of_files(case[:-1], case[-1])
 

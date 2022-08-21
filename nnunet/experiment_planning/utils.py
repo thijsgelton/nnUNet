@@ -65,7 +65,7 @@ def split_4d(input_folder, num_processes=default_num_threads, overwrite_task_out
         if not isdir(curr_out_dir):
             os.mkdir(curr_out_dir)
         curr_dir = join(input_folder, subdir)
-        nii_files = [join(curr_dir, i) for i in os.listdir(curr_dir) if i.endswith(".nii.gz")]
+        nii_files = [join(curr_dir, i) for i in os.listdir(curr_dir) if i.endswith(".tif")]
         nii_files.sort()
         for n in nii_files:
             files.append(n)
@@ -91,8 +91,8 @@ def create_lists_from_splitted_dataset(base_folder_splitted):
     for tr in training_files:
         cur_pat = []
         for mod in range(num_modalities):
-            cur_pat.append(join(base_folder_splitted, "imagesTr", tr['image'].split("/")[-1][:-7] +
-                                "_%04.0d.nii.gz" % mod))
+            cur_pat.append(join(base_folder_splitted, "imagesTr", tr['image'].split("/")[-1][:-4] +
+                                "_%04.0d.tif" % mod))
         cur_pat.append(join(base_folder_splitted, "labelsTr", tr['label'].split("/")[-1]))
         lists.append(cur_pat)
     return lists, {int(i): d['modality'][str(i)] for i in d['modality'].keys()}
@@ -107,14 +107,14 @@ def create_lists_from_splitted_dataset_folder(folder):
     caseIDs = get_caseIDs_from_splitted_dataset_folder(folder)
     list_of_lists = []
     for f in caseIDs:
-        list_of_lists.append(subfiles(folder, prefix=f, suffix=".nii.gz", join=True, sort=True))
+        list_of_lists.append(subfiles(folder, prefix=f, suffix=".tif", join=True, sort=True))
     return list_of_lists
 
 
 def get_caseIDs_from_splitted_dataset_folder(folder):
-    files = subfiles(folder, suffix=".nii.gz", join=False)
+    files = subfiles(folder, suffix=".tif", join=False)
     # all files must be .nii.gz and have 4 digit modality index
-    files = [i[:-12] for i in files]
+    files = [i[:-9] for i in files]
     # only unique patient ids
     files = np.unique(files)
     return files

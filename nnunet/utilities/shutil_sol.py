@@ -1,10 +1,3 @@
-"""
-When copying files from a compute node to a storage server on DIAG's cluster, using the
-standard shutil copy() and copytree() functions leads to errors. These functions copy
-files but also try to copy metadata such as permissions, and our storage servers to not
-support that. This module defines replacement functions.
-"""
-
 import os
 import shutil
 
@@ -33,5 +26,5 @@ def copytree(src, dst, ignore=None):
 
         if len(non_permission_errors) > 0:
             raise shutil.Error(non_permission_errors)
-        
+
     return dst

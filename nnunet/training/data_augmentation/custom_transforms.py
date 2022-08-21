@@ -51,7 +51,7 @@ class MaskTransform(AbstractTransform):
         for b in range(data.shape[0]):
             mask = seg[b, self.mask_idx_in_seg]
             for c in range(data.shape[1]):
-                if self.dct_for_where_it_was_used[c]:
+                if self.dct_for_where_it_was_used:
                     data[b, c][mask < 0] = self.set_outside_to
         data_dict[self.data_key] = data
         return data_dict

@@ -48,7 +48,7 @@ matplotlib.use("agg")
 
 class nnUNetTrainer(NetworkTrainer):
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
-                 unpack_data=True, deterministic=True, fp16=False):
+                 unpack_data=False, deterministic=True, fp16=False):
         """
         :param deterministic:
         :param fold: can be either [0 ... 5) for cross-validation, 'all' to train on all available training data or
@@ -360,7 +360,7 @@ class nnUNetTrainer(NetworkTrainer):
         self.intensity_properties = plans['dataset_properties']['intensityproperties']
         self.normalization_schemes = plans['normalization_schemes']
         self.base_num_features = plans['base_num_features']
-        self.num_input_channels = plans['num_modalities']
+        self.num_input_channels = 3#plans['num_modalities']
         self.num_classes = plans['num_classes'] + 1  # background is no longer in num_classes
         self.classes = plans['all_classes']
         self.use_mask_for_norm = plans['use_mask_for_norm']
@@ -606,9 +606,9 @@ class nnUNetTrainer(NetworkTrainer):
                 else:
                     softmax_fname = None
 
-                """There is a problem with python process communication that prevents us from communicating objects
+                """There is a problem with python process communication that prevents us from communicating obejcts
                 larger than 2 GB between processes (basically when the length of the pickle string that will be sent is
-                communicated by the multiprocessing.Pipe object then the placeholder (I think) does not allow for long
+                communicated by the multiprocessing.Pipe object then the placeholder (\%i I think) does not allow for long
                 enough strings (lol). This could be fixed by changing i to l (for long) but that would require manually
                 patching system python code. We circumvent that problem here by saving softmax_pred to a npy file that will
                 then be read (and finally deleted) by the Process. save_segmentation_nifti_from_softmax can take either
