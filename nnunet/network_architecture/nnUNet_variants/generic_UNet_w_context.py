@@ -14,8 +14,9 @@
 import numpy as np
 import torch
 import torch.nn.functional
+from torchvision.transforms.functional_tensor import crop
 
-from nnunet.network_architecture.generic_UNet import Generic_UNet
+from nnunet.network_architecture.generic_UNet import Generic_UNet, StackedConvLayers, ConvDropoutNormNonlin
 
 
 class Generic_UNet_w_context(Generic_UNet):
@@ -27,32 +28,44 @@ class Generic_UNet_w_context(Generic_UNet):
 
     use_this_for_batch_size_computation_2D = 19739648
 
-    def __init__(self, context_encoder: torch.nn.Sequential, *args, **kwargs):
+    def __init__(self, context_encoder: torch.nn.Module, *args, **kwargs):
         """
-        First version that uses a CNN to encode context around the main patch.
+        First version that uses a CNN to encode context around the main patch. Assuming that the following formula holds:
+        Encoder contains 5 downsamplings and the input patch is at 8.0 mpp. This results in 2**3 * 2**5 = 2**8 mpp patch
+         of 16x16xFM (this depends on resnet18/50). nnUNet will be fixed at 7 poolings to allow for the encoder in VRAM.
+         With 7 poolings the input of 0.5 mpp will be 2**-1 * 2**7 = 2**6 mpp. To braze the gap the encoded patch will be
+         cropped by 2**2 = 2**(8-6).
         """
         super(Generic_UNet_w_context, self).__init__(*args, **kwargs)
         self.context_encoder = context_encoder
-
-        self.merge = MultiScaleMergeBlock(
-            layer_num=4,
-            base_fm=self.base_fm,
-            fm_delay=self.fm_delay,
-            scale_side=[16],
-            act=self.get_act(self.act_type),
-            norm=self.get_norm(self.norm_type)
-        )
+        reduce_conv_kwargs = self.conv_kwargs.copy()
+        reduce_conv_kwargs['kernel_size'] = [1, 1]
+        reduce_conv_kwargs['padding'] = [0, 0]
+        self.reduce_fm_conv = StackedConvLayers(480 + 512, 480, 1,
+                                                self.conv_op, reduce_conv_kwargs, self.norm_op,
+                                                self.norm_op_kwargs, self.dropout_op,
+                                                self.dropout_op_kwargs, self.nonlin, self.nonlin_kwargs,
+                                                basic_block=ConvDropoutNormNonlin)
 
     def forward(self, x):
+        main, context = x
         skips = []
         seg_outputs = []
         for d in range(len(self.conv_blocks_context) - 1):
-            x = self.conv_blocks_context[d](x)
-            skips.append(x)
+            main = self.conv_blocks_context[d](main)
+            skips.append(main)
             if not self.convolutional_pooling:
-                x = self.td[d](x)
+                main = self.td[d](main)
 
-        x = self.conv_blocks_context[-1](x)
+        main_encoding = self.conv_blocks_context[-1](main)
+        context_encoding = self.context_encoder.forward_features(context)
+
+        start_x, start_y = (torch.ceil(torch.tensor(context_encoding.shape[-2:]) / 2) - (
+                torch.tensor(main_encoding.shape[-2:]) // 2)).type(torch.int)
+        w, h = main_encoding.shape[-2:]
+        x = torch.cat((crop(context_encoding, start_x, start_y, w, h), main_encoding), dim=1)
+
+        x = self.reduce_fm_conv(x)
 
         for u in range(len(self.tu)):
             x = self.tu[u](x)
@@ -65,45 +78,3 @@ class Generic_UNet_w_context(Generic_UNet):
                                               zip(list(self.upscale_logits_ops)[::-1], seg_outputs[:-1][::-1])])
         else:
             return seg_outputs[-1]
-
-    @staticmethod
-    def compute_approx_vram_consumption(patch_size, num_pool_per_axis, base_num_features, max_num_features,
-                                        num_modalities, num_classes, pool_op_kernel_sizes, deep_supervision=False,
-                                        conv_per_stage=2):
-        """
-        This only applies for num_conv_per_stage and convolutional_upsampling=True
-        not real vram consumption. just a constant term to which the vram consumption will be approx proportional
-        (+ offset for parameter storage)
-        :param deep_supervision:
-        :param patch_size:
-        :param num_pool_per_axis:
-        :param base_num_features:
-        :param max_num_features:
-        :param num_modalities:
-        :param num_classes:
-        :param pool_op_kernel_sizes:
-        :return:
-        """
-        if not isinstance(num_pool_per_axis, np.ndarray):
-            num_pool_per_axis = np.array(num_pool_per_axis)
-
-        npool = len(pool_op_kernel_sizes)
-
-        map_size = np.array(patch_size)
-        tmp = np.int64((conv_per_stage * 2 + 1) * np.prod(map_size, dtype=np.int64) * base_num_features +
-                       num_modalities * np.prod(map_size, dtype=np.int64) +
-                       num_classes * np.prod(map_size, dtype=np.int64))
-
-        num_feat = base_num_features
-
-        for p in range(npool):
-            for pi in range(len(num_pool_per_axis)):
-                map_size[pi] /= pool_op_kernel_sizes[p][pi]
-            num_feat = min(num_feat * 2, max_num_features)
-            num_blocks = (conv_per_stage * 2 + 1) if p < (
-                    npool - 1) else conv_per_stage  # conv_per_stage + conv_per_stage for the convs of encode/decode and 1 for transposed conv
-            tmp += num_blocks * np.prod(map_size, dtype=np.int64) * num_feat
-            if deep_supervision and p < (npool - 2):
-                tmp += np.prod(map_size, dtype=np.int64) * num_classes
-            # print(p, map_size, num_feat, tmp)
-        return tmp

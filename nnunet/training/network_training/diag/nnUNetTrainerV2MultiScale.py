@@ -13,44 +13,56 @@
 #    limitations under the License.
 
 
-from collections import OrderedDict
+from glob import glob
 from typing import Tuple
 
 import numpy as np
+import timm
 import torch
-from nnunet.training.data_augmentation.data_augmentation_moreDA import get_moreDA_augmentation
-from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
-from nnunet.utilities.to_torch import maybe_to_torch, to_cuda
-from nnunet.network_architecture.generic_UNet import Generic_UNet
+from batchgenerators.utilities.file_and_folder_operations import *
+from scipy.stats import zscore
+from torch import nn
+from torch.cuda.amp import autocast
+from wholeslidedata.accessories.asap.parser import AsapAnnotationParser
+from wholeslidedata.annotation.wholeslideannotation import WholeSlideAnnotation
+from wholeslidedata.image.wholeslideimage import WholeSlideImage
+
 from nnunet.network_architecture.initialization import InitWeights_He
 from nnunet.network_architecture.neural_network import SegmentationNetwork
+from nnunet.network_architecture.nnUNet_variants.generic_UNet_w_context import Generic_UNet_w_context
+from nnunet.training.data_augmentation.data_augmentation_noDA import get_no_augmentation
 from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params, \
     get_patch_size, default_3D_augmentation_params
 from nnunet.training.dataloading.dataset_loading import unpack_dataset
+from nnunet.training.learning_rate.poly_lr import poly_lr
+from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
 from nnunet.training.network_training.nnUNetTrainer import nnUNetTrainer
 from nnunet.utilities.nd_softmax import softmax_helper
-from sklearn.model_selection import KFold
-from torch import nn
-from torch.cuda.amp import autocast
-from nnunet.training.learning_rate.poly_lr import poly_lr
-from batchgenerators.utilities.file_and_folder_operations import *
+from nnunet.utilities.to_torch import maybe_to_torch, to_cuda
 
 
-class nnUNetTrainerV2(nnUNetTrainer):
+class nnUNetTrainerV2MultiScale(nnUNetTrainer):
     """
     Info for Fabian: same as internal nnUNetTrainerV2_2
     """
 
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
-                 unpack_data=True, deterministic=True, fp16=False):
+                 unpack_data=True, deterministic=True, fp16=False, data_origin=None, labels_dict=None, spacing=8.0,
+                 timm_encoder_kwargs=None):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
+        self.spacing = spacing
+        self.labels_dict = labels_dict
+        self.data_origin = data_origin
+        if not timm_encoder_kwargs:
+            raise ValueError(f"Supply kwargs for the timm encoder.")
+        self.timm_encoder_kwargs = timm_encoder_kwargs
         self.max_num_epochs = 1000
         self.initial_lr = 1e-2
         self.deep_supervision_scales = None
         self.ds_loss_weights = None
-
         self.pin_memory = True
+        self.pad_context = None
 
     def initialize(self, training=True, force_load_plans=False):
         """
@@ -68,8 +80,8 @@ class nnUNetTrainerV2(nnUNetTrainer):
             if force_load_plans or (self.plans is None):
                 self.load_plans_file()
 
+            self.encoder = timm.create_model(**self.timm_encoder_kwargs)
             self.process_plans(self.plans)
-
             self.setup_DA_params()
 
             ################# Here we wrap the loss for deep supervision ############
@@ -102,14 +114,13 @@ class nnUNetTrainerV2(nnUNetTrainer):
                         "INFO: Not unpacking data! Training may be slow due to that. Pray you are not using 2d or you "
                         "will wait all winter for your model to finish!")
 
-                self.tr_gen, self.val_gen = get_moreDA_augmentation(
+                # Starting with no augmentation. This could disturb the training due to misalignment
+                self.tr_gen, self.val_gen = get_no_augmentation(  # get_moreDA_augmentation
                     self.dl_tr, self.dl_val,
-                    self.data_aug_params[
-                        'patch_size_for_spatialtransform'],
                     self.data_aug_params,
                     deep_supervision_scales=self.deep_supervision_scales,
                     pin_memory=self.pin_memory,
-                    use_nondetMultiThreadedAugmenter=False
+                    # use_nondetMultiThreadedAugmenter=False
                 )
                 self.print_to_log_file("TRAINING KEYS:\n %s" % (str(self.dataset_tr.keys())),
                                        also_print_to_console=False)
@@ -124,6 +135,7 @@ class nnUNetTrainerV2(nnUNetTrainer):
             assert isinstance(self.network, (SegmentationNetwork, nn.DataParallel))
         else:
             self.print_to_log_file('self.was_initialized is True, not running self.initialize again')
+        self.pad_context = torch.nn.ZeroPad2d(self.tr_gen.generator.need_to_pad[0] // 2)
         self.was_initialized = True
 
     def initialize_network(self):
@@ -151,12 +163,15 @@ class nnUNetTrainerV2(nnUNetTrainer):
         dropout_op_kwargs = {'p': 0, 'inplace': True}
         net_nonlin = nn.LeakyReLU
         net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
-        self.network = Generic_UNet(self.num_input_channels, self.base_num_features, self.num_classes,
-                                    len(self.net_num_pool_op_kernel_sizes),
-                                    self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
-                                    dropout_op_kwargs,
-                                    net_nonlin, net_nonlin_kwargs, True, False, lambda x: x, InitWeights_He(1e-2),
-                                    self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes, False, True, True)
+        self.network = Generic_UNet_w_context(self.encoder, self.num_input_channels, self.base_num_features,
+                                              self.num_classes,
+                                              len(self.net_num_pool_op_kernel_sizes),
+                                              self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
+                                              dropout_op_kwargs,
+                                              net_nonlin, net_nonlin_kwargs, True, False, lambda x: x,
+                                              InitWeights_He(1e-2),
+                                              self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes, False,
+                                              True, True)
         if torch.cuda.is_available():
             self.network.cuda()
         self.network.inference_apply_nonlin = softmax_helper
@@ -202,7 +217,8 @@ class nnUNetTrainerV2(nnUNetTrainer):
                                                          use_sliding_window: bool = True, step_size: float = 0.5,
                                                          use_gaussian: bool = True, pad_border_mode: str = 'constant',
                                                          pad_kwargs: dict = None, all_in_gpu: bool = False,
-                                                         verbose: bool = True, mixed_precision=True) -> Tuple[np.ndarray, np.ndarray]:
+                                                         verbose: bool = True, mixed_precision=True) -> Tuple[
+        np.ndarray, np.ndarray]:
         """
         We need to wrap this because we need to enforce self.network.do_ds = False for prediction
         """
@@ -229,23 +245,26 @@ class nnUNetTrainerV2(nnUNetTrainer):
         :param run_online_evaluation:
         :return:
         """
-        data_dict = next(data_generator)
-        data = data_dict['data']
+        data_dict = next(data_generator)  # Don't use zero-padding, sample bigger and then crop
+        main = data_dict['data']
         target = data_dict['target']
+        context = self.sample_context(data_dict['properties'], data_dict['keys'])
 
-        data = maybe_to_torch(data)
+        main = maybe_to_torch(main)
+        context = self.pad_context(maybe_to_torch(context))
         target = maybe_to_torch(target)
 
         if torch.cuda.is_available():
-            data = to_cuda(data)
+            main = to_cuda(main)
             target = to_cuda(target)
+            context = to_cuda(context)
 
         self.optimizer.zero_grad()
 
         if self.fp16:
             with autocast():
-                output = self.network(data)
-                del data
+                output = self.network((main, context))
+                del main, context
                 l = self.loss(output, target)
 
             if do_backprop:
@@ -255,8 +274,8 @@ class nnUNetTrainerV2(nnUNetTrainer):
                 self.amp_grad_scaler.step(self.optimizer)
                 self.amp_grad_scaler.update()
         else:
-            output = self.network(data)
-            del data
+            output = self.network((main, context))
+            del main, context
             l = self.loss(output, target)
 
             if do_backprop:
@@ -270,71 +289,6 @@ class nnUNetTrainerV2(nnUNetTrainer):
         del target
 
         return l.detach().cpu().numpy()
-
-    def do_split(self):
-        """
-        The default split is a 5 fold CV on all available training cases. nnU-Net will create a split (it is seeded,
-        so always the same) and save it as splits_final.pkl file in the preprocessed data directory.
-        Sometimes you may want to create your own split for various reasons. For this you will need to create your own
-        splits_final.pkl file. If this file is present, nnU-Net is going to use it and whatever splits are defined in
-        it. You can create as many splits in this file as you want. Note that if you define only 4 splits (fold 0-3)
-        and then set fold=4 when training (that would be the fifth split), nnU-Net will print a warning and proceed to
-        use a random 80:20 data split.
-        :return:
-        """
-        if self.fold == "all":
-            # if fold==all then we use all images for training and validation
-            tr_keys = val_keys = list(self.dataset.keys())
-        else:
-            splits_file = join(self.dataset_directory, "splits_final.pkl")
-
-            # if the split file does not exist we need to create it
-            if not isfile(splits_file):
-                self.print_to_log_file("Creating new 5-fold cross-validation split...")
-                splits = []
-                all_keys_sorted = np.sort(list(self.dataset.keys()))
-                kfold = KFold(n_splits=5, shuffle=True, random_state=12345)
-                for i, (train_idx, test_idx) in enumerate(kfold.split(all_keys_sorted)):
-                    train_keys = np.array(all_keys_sorted)[train_idx]
-                    test_keys = np.array(all_keys_sorted)[test_idx]
-                    splits.append(OrderedDict())
-                    splits[-1]['train'] = train_keys
-                    splits[-1]['val'] = test_keys
-                save_pickle(splits, splits_file)
-
-            else:
-                self.print_to_log_file("Using splits from existing split file:", splits_file)
-                splits = load_pickle(splits_file)
-                self.print_to_log_file("The split file contains %d splits." % len(splits))
-
-            self.print_to_log_file("Desired fold for training: %d" % self.fold)
-            if self.fold < len(splits):
-                tr_keys = splits[self.fold]['train']
-                val_keys = splits[self.fold]['val']
-                self.print_to_log_file("This split has %d training and %d validation cases."
-                                       % (len(tr_keys), len(val_keys)))
-            else:
-                self.print_to_log_file("INFO: You requested fold %d for training but splits "
-                                       "contain only %d folds. I am now creating a "
-                                       "random (but seeded) 80:20 split!" % (self.fold, len(splits)))
-                # if we request a fold that is not in the split file, create a random 80:20 split
-                rnd = np.random.RandomState(seed=12345 + self.fold)
-                keys = np.sort(list(self.dataset.keys()))
-                idx_tr = rnd.choice(len(keys), int(len(keys) * 0.8), replace=False)
-                idx_val = [i for i in range(len(keys)) if i not in idx_tr]
-                tr_keys = [keys[i] for i in idx_tr]
-                val_keys = [keys[i] for i in idx_val]
-                self.print_to_log_file("This random 80:20 split has %d training and %d validation cases."
-                                       % (len(tr_keys), len(val_keys)))
-
-        tr_keys.sort()
-        val_keys.sort()
-        self.dataset_tr = OrderedDict()
-        for i in tr_keys:
-            self.dataset_tr[i] = self.dataset[i]
-        self.dataset_val = OrderedDict()
-        for i in val_keys:
-            self.dataset_val[i] = self.dataset[i]
 
     def setup_DA_params(self):
         """
@@ -440,3 +394,47 @@ class nnUNetTrainerV2(nnUNetTrainer):
         ret = super().run_training()
         self.network.do_ds = ds
         return ret
+
+    def sample_context(self, properties, keys):
+        parser = AsapAnnotationParser(labels={'none': 0}, sample_label_names=['none'])
+        context = np.zeros((len(properties), self.plans['num_modalities'], *self.patch_size))
+        for indx, props in enumerate(properties):
+            anno_number = int(keys[indx].split("_")[-1].strip("ROI"))
+            wsa = WholeSlideAnnotation(glob(f"{self.data_origin}/{'_'.join(keys[indx].split('_')[:5])}.xml")[0],
+                                       parser=parser)
+            wsi = WholeSlideImage(glob(f"{self.data_origin}/{'_'.join(keys[indx].split('_')[:5])}.tif")[0])
+            anno = wsa.sampling_annotations[anno_number]
+            x, y = anno.center
+            x += props['offset_x']
+            y += props['offset_y']
+            context[indx] = self.z_score_norm(wsi.get_patch(x, y, *self.patch_size, spacing=self.spacing)) \
+                .transpose(2, 0, 1)
+        return context
+
+    @staticmethod
+    def z_score_norm(array: np.ndarray):
+        return zscore(array.reshape(-1, 3)).reshape(array.shape)
+
+    def plot_network_architecture(self):
+        try:
+            from batchgenerators.utilities.file_and_folder_operations import join
+            import hiddenlayer as hl
+            if torch.cuda.is_available():
+                g = hl.build_graph(self.network,
+                                   ([torch.rand((1, self.num_input_channels, *self.patch_size)).cuda()]) * 2,
+                                   transforms=None)
+            else:
+                g = hl.build_graph(self.network, ([torch.rand((1, self.num_input_channels, *self.patch_size))]) * 2,
+                                   transforms=None)
+            g.save(join(self.output_folder, "network_architecture.pdf"))
+            del g
+        except Exception as e:
+            self.print_to_log_file("Unable to plot network architecture:")
+            self.print_to_log_file(e)
+
+            self.print_to_log_file("\nprinting the network instead:\n")
+            self.print_to_log_file(self.network)
+            self.print_to_log_file("\n")
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()

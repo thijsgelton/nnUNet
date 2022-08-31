@@ -573,6 +573,14 @@ class DataLoader2D(SlimDataLoaderBase):
             # be padded with -1 constant whereas seg_from_previous_stage needs to be padded with 0s (we could also
             # remove label -1 in the data augmentation but this way it is less error prone)
 
+            width, height = case_all_data.shape[-2:]
+
+            offset_x = (valid_bbox_x_lb + (valid_bbox_x_ub - valid_bbox_x_lb) / 2) - width // 2
+            offset_y = (valid_bbox_y_lb + (valid_bbox_y_ub - valid_bbox_y_lb) / 2) - width // 2
+
+            case_properties[j]['offset_x'] = int(offset_x)
+            case_properties[j]['offset_y'] = int(offset_y)
+
             case_all_data = case_all_data[:, valid_bbox_x_lb:valid_bbox_x_ub,
                             valid_bbox_y_lb:valid_bbox_y_ub]
 
