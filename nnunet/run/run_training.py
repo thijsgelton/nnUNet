@@ -14,7 +14,6 @@
 
 
 import argparse
-import json
 
 from batchgenerators.utilities.file_and_folder_operations import *
 

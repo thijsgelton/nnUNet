@@ -20,6 +20,7 @@ import numpy as np
 import timm
 import torch
 from batchgenerators.utilities.file_and_folder_operations import *
+from matplotlib import pyplot as plt
 from scipy.stats import zscore
 from torch import nn
 from torch.cuda.amp import autocast
@@ -32,7 +33,7 @@ from nnunet.network_architecture.neural_network import SegmentationNetwork
 from nnunet.network_architecture.nnUNet_variants.generic_UNet_w_context import Generic_UNet_w_context
 from nnunet.training.data_augmentation.data_augmentation_noDA import get_no_augmentation
 from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params, \
-    get_patch_size, default_3D_augmentation_params
+    get_patch_size
 from nnunet.training.dataloading.dataset_loading import unpack_dataset
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
@@ -149,15 +150,9 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
         Known issue: forgot to set neg_slope=0 in InitWeights_He; should not make a difference though
         :return:
         """
-        if self.threeD:
-            conv_op = nn.Conv3d
-            dropout_op = nn.Dropout3d
-            norm_op = nn.InstanceNorm3d
-
-        else:
-            conv_op = nn.Conv2d
-            dropout_op = nn.Dropout2d
-            norm_op = nn.InstanceNorm2d
+        conv_op = nn.Conv2d
+        dropout_op = nn.Dropout2d
+        norm_op = nn.InstanceNorm2d
 
         norm_op_kwargs = {'eps': 1e-5, 'affine': True}
         dropout_op_kwargs = {'p': 0, 'inplace': True}
@@ -301,26 +296,12 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
 
         self.deep_supervision_scales = [[1, 1, 1]] + list(list(i) for i in 1 / np.cumprod(
             np.vstack(self.net_num_pool_op_kernel_sizes), axis=0))[:-1]
-
-        if self.threeD:
-            self.data_aug_params = default_3D_augmentation_params
-            self.data_aug_params['rotation_x'] = (-30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
-            self.data_aug_params['rotation_y'] = (-30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
-            self.data_aug_params['rotation_z'] = (-30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
-            if self.do_dummy_2D_aug:
-                self.data_aug_params["dummy_2D"] = True
-                self.print_to_log_file("Using dummy2d data augmentation")
-                self.data_aug_params["elastic_deform_alpha"] = \
-                    default_2D_augmentation_params["elastic_deform_alpha"]
-                self.data_aug_params["elastic_deform_sigma"] = \
-                    default_2D_augmentation_params["elastic_deform_sigma"]
-                self.data_aug_params["rotation_x"] = default_2D_augmentation_params["rotation_x"]
-        else:
-            self.do_dummy_2D_aug = False
-            if max(self.patch_size) / min(self.patch_size) > 1.5:
-                default_2D_augmentation_params['rotation_x'] = (-15. / 360 * 2. * np.pi, 15. / 360 * 2. * np.pi)
-            self.data_aug_params = default_2D_augmentation_params
+        self.do_dummy_2D_aug = False
+        if max(self.patch_size) / min(self.patch_size) > 1.5:
+            default_2D_augmentation_params['rotation_x'] = (-15. / 360 * 2. * np.pi, 15. / 360 * 2. * np.pi)
+        self.data_aug_params = default_2D_augmentation_params
         self.data_aug_params["mask_was_used_for_normalization"] = self.use_mask_for_norm
+        self.data_aug_params["scale_range"] = (1.0, 1.0)
 
         if self.do_dummy_2D_aug:
             self.basic_generator_patch_size = get_patch_size(self.patch_size[1:],
@@ -335,7 +316,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
                                                              self.data_aug_params['rotation_z'],
                                                              self.data_aug_params['scale_range'])
 
-        self.data_aug_params["scale_range"] = (0.7, 1.4)
+        # self.data_aug_params["scale_range"] = (0.7, 1.4)
         self.data_aug_params["do_elastic"] = False
         self.data_aug_params['selected_seg_channels'] = [0]
         self.data_aug_params['patch_size_for_spatialtransform'] = self.patch_size
@@ -407,7 +388,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
             x, y = anno.center
             x += props['offset_x']
             y += props['offset_y']
-            context[indx] = self.z_score_norm(wsi.get_patch(x, y, *self.patch_size, spacing=self.spacing)) \
+            context[indx] = wsi.get_patch(x, y, *self.patch_size, spacing=self.spacing) \
                 .transpose(2, 0, 1)
         return context
 
