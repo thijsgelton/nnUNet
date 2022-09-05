@@ -20,7 +20,6 @@ import numpy as np
 import timm
 import torch
 from batchgenerators.utilities.file_and_folder_operations import *
-from matplotlib import pyplot as plt
 from scipy.stats import zscore
 from torch import nn
 from torch.cuda.amp import autocast
@@ -35,6 +34,7 @@ from nnunet.training.data_augmentation.data_augmentation_noDA import get_no_augm
 from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params, \
     get_patch_size
 from nnunet.training.dataloading.dataset_loading import unpack_dataset
+from nnunet.training.dataloading.diag.dataset_loading_insideroi import DataLoader2DROIs
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
 from nnunet.training.network_training.nnUNetTrainer import nnUNetTrainer
@@ -63,7 +63,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
         self.deep_supervision_scales = None
         self.ds_loss_weights = None
         self.pin_memory = True
-        self.pad_context = None
 
     def initialize(self, training=True, force_load_plans=False):
         """
@@ -136,8 +135,19 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
             assert isinstance(self.network, (SegmentationNetwork, nn.DataParallel))
         else:
             self.print_to_log_file('self.was_initialized is True, not running self.initialize again')
-        self.pad_context = torch.nn.ZeroPad2d(self.tr_gen.generator.need_to_pad[0] // 2)
         self.was_initialized = True
+
+    def get_basic_generators(self):
+        self.load_dataset()
+        self.do_split()
+
+        dl_tr = DataLoader2DROIs(self.dataset_tr, self.basic_generator_patch_size, self.patch_size, self.batch_size,
+                                 oversample_foreground_percent=self.oversample_foreground_percent,
+                                 pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r')
+        dl_val = DataLoader2DROIs(self.dataset_val, self.patch_size, self.patch_size, self.batch_size,
+                                  oversample_foreground_percent=self.oversample_foreground_percent,
+                                  pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r')
+        return dl_tr, dl_val
 
     def initialize_network(self):
         """
@@ -246,7 +256,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
         context = self.sample_context(data_dict['properties'], data_dict['keys'])
 
         main = maybe_to_torch(main)
-        context = self.pad_context(maybe_to_torch(context))
+        context = maybe_to_torch(context)
         target = maybe_to_torch(target)
 
         if torch.cuda.is_available():
@@ -381,15 +391,20 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
         context = np.zeros((len(properties), self.plans['num_modalities'], *self.patch_size))
         for indx, props in enumerate(properties):
             anno_number = int(keys[indx].split("_")[-1].strip("ROI"))
-            wsa = WholeSlideAnnotation(glob(f"{self.data_origin}/{'_'.join(keys[indx].split('_')[:5])}.xml")[0],
+            wsa = WholeSlideAnnotation(glob(f"{self.data_origin}/{'_'.join(keys[indx].split('_')[:-1])}.xml")[0],
                                        parser=parser)
-            wsi = WholeSlideImage(glob(f"{self.data_origin}/{'_'.join(keys[indx].split('_')[:5])}.tif")[0])
+            wsi = WholeSlideImage(glob(f"{self.data_origin}/{'_'.join(keys[indx].split('_')[:-1])}.tif")[0],
+                                  backend='asap')
             anno = wsa.sampling_annotations[anno_number]
             x, y = anno.center
             x += props['offset_x']
             y += props['offset_y']
-            context[indx] = wsi.get_patch(x, y, *self.patch_size, spacing=self.spacing) \
-                .transpose(2, 0, 1)
+            context[indx] = wsi.get_patch(
+                x,
+                y,
+                *self.patch_size,
+                spacing=self.spacing
+            ).transpose(2, 0, 1) / 255.
         return context
 
     @staticmethod

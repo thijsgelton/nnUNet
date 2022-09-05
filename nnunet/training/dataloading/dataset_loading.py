@@ -572,15 +572,6 @@ class DataLoader2D(SlimDataLoaderBase):
             # Why not just concatenate them here and forget about the if statements? Well that's because segneeds to
             # be padded with -1 constant whereas seg_from_previous_stage needs to be padded with 0s (we could also
             # remove label -1 in the data augmentation but this way it is less error prone)
-
-            width, height = case_all_data.shape[-2:]
-
-            offset_x = (valid_bbox_x_lb + (valid_bbox_x_ub - valid_bbox_x_lb) / 2) - width // 2
-            offset_y = (valid_bbox_y_lb + (valid_bbox_y_ub - valid_bbox_y_lb) / 2) - width // 2
-
-            case_properties[j]['offset_x'] = int(offset_x)
-            case_properties[j]['offset_y'] = int(offset_y)
-
             case_all_data = case_all_data[:, valid_bbox_x_lb:valid_bbox_x_ub, valid_bbox_y_lb:valid_bbox_y_ub]
 
             case_all_data_donly = np.pad(case_all_data[:-1], ((0, 0),
