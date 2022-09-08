@@ -22,6 +22,7 @@ import numpy as np
 import timm
 import torch
 from batchgenerators.utilities.file_and_folder_operations import *
+from mtdp import build_model
 from scipy.stats import zscore
 from torch import nn
 from torch.cuda.amp import autocast
@@ -56,16 +57,16 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
 
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
                  unpack_data=True, deterministic=True, fp16=False, data_origin=None, labels_dict=None, spacing=8.0,
-                 encoder_name=None, timm_encoder_kwargs=None):
+                 encoder_kwargs=None):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
         self.spacing = spacing
         self.labels_dict = labels_dict
         self.data_origin = data_origin
-        self.timm_encoder_kwargs = timm_encoder_kwargs
-        # if not encoder_name:
-        #     raise ValueError(f"Sorry, encoder_name cannot be empty. Try one of the following: \n{pprint()}")
-        self.encoder_name = encoder_name
+        if encoder_kwargs is None:
+            print("Since encoder_kwargs is empty, we will use the default: resnet18 with imagenet weights.")
+            encoder_kwargs = {"arch": "resnet18", "pretrained": "imagenet"}
+        self.encoder_kwargs = encoder_kwargs
         self.max_num_epochs = 1000
         self.initial_lr = 1e-2
         self.deep_supervision_scales = None
@@ -88,7 +89,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
             if force_load_plans or (self.plans is None):
                 self.load_plans_file()
 
-            self.encoder = timm.create_model(**self.timm_encoder_kwargs)
+            self.encoder = build_model(**self.encoder_kwargs)
             self.process_plans(self.plans)
             self.setup_DA_params()
 
