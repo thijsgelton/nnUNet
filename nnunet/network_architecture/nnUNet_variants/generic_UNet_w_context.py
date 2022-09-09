@@ -65,7 +65,7 @@ class Generic_UNet_w_context(Generic_UNet):
                 main = self.td[d](main)
 
         main_encoding = self.conv_blocks_context[-1](main)
-        context_encoding = self.context_encoder.forward_features(context)
+        context_encoding = self.context_encoder(context)
 
         start_x, start_y = (
                 torch.div(torch.tensor(context_encoding.shape[-2:]), 2, rounding_mode='trunc') -
