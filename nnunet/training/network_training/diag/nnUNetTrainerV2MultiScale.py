@@ -11,16 +11,14 @@
 #    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
-
-
 from glob import glob
 from multiprocessing import Pool
 from time import sleep
-from typing import Tuple, Union
+from typing import Tuple
 
 import numpy as np
-import timm
 import torch
+import wandb
 from batchgenerators.utilities.file_and_folder_operations import *
 from mtdp import build_model
 from scipy.stats import zscore
@@ -45,12 +43,13 @@ from nnunet.training.dataloading.diag.dataset_loading_insideroi import DataLoade
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
 from nnunet.training.network_training.nnUNetTrainer import nnUNetTrainer
+from nnunet.training.network_training.nnUNetTrainerV2 import nnUNetTrainerV2
 from nnunet.utilities import shutil_sol
 from nnunet.utilities.nd_softmax import softmax_helper
 from nnunet.utilities.to_torch import maybe_to_torch, to_cuda
 
 
-class nnUNetTrainerV2MultiScale(nnUNetTrainer):
+class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
     """
     Info for Fabian: same as internal nnUNetTrainerV2_2
     """
@@ -195,18 +194,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
         self.optimizer = torch.optim.SGD(self.network.parameters(), self.initial_lr, weight_decay=self.weight_decay,
                                          momentum=0.99, nesterov=True)
         self.lr_scheduler = None
-
-    def run_online_evaluation(self, output, target):
-        """
-        due to deep supervision the return value and the reference are now lists of tensors. We only need the full
-        resolution output because this is what we are interested in in the end. The others are ignored
-        :param output:
-        :param target:
-        :return:
-        """
-        target = target[0]
-        output = output[0]
-        return super().run_online_evaluation(output, target)
 
     def validate(self, do_mirroring: bool = True, use_sliding_window: bool = True, step_size: float = 0.5,
                  save_softmax: bool = True, use_gaussian: bool = True, overwrite: bool = True,
@@ -551,6 +538,9 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
         we also need to make sure deep supervision in the network is enabled for training, thus the wrapper
         :return:
         """
+        config = self.get_debug_information()
+        wandb.init(project=os.environ.get("WANDB_PROJECT"), config=config)
+
         self.maybe_update_lr(self.epoch)  # if we dont overwrite epoch then self.epoch+1 is used which is not what we
         # want at the start of the training
         ds = self.network.do_ds
@@ -607,3 +597,18 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainer):
         finally:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+
+    def on_epoch_end(self):
+        continue_training = super().on_epoch_end()
+        self.log_to_wandb()
+        return continue_training
+
+    def log_to_wandb(self):
+        wandb.log({
+            "train/loss": self.all_tr_losses[-1],
+            "val/loss": self.all_val_losses[-1],
+            **{f'val/metric_{cls_index}': score for cls_index, score in
+               self.all_val_eval_metrics_per_class[-1].items() if not np.isnan(score)},
+            "val/metric": self.all_val_eval_metrics[-1],
+            "learning_rate": self.optimizer.param_groups[0]['lr']
+        })
