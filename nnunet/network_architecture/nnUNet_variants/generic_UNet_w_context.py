@@ -19,9 +19,11 @@ import torch.nn.functional
 from batchgenerators.augmentations.utils import pad_nd_image
 from torch import nn
 from torch.cuda.amp import autocast
+from torchvision.transforms import CenterCrop
+from torchvision.transforms.functional import center_crop
 from torchvision.transforms.functional_tensor import crop
 
-from nnunet.network_architecture.generic_UNet import Generic_UNet, StackedConvLayers, ConvDropoutNormNonlin
+from nnunet.network_architecture.generic_UNet import Generic_UNet, StackedConvLayers, ConvDropoutNormNonlin, Upsample
 from nnunet.utilities.random_stuff import no_op
 from nnunet.utilities.to_torch import maybe_to_torch, to_cuda
 
@@ -48,11 +50,16 @@ class Generic_UNet_w_context(Generic_UNet):
         reduce_conv_kwargs = self.conv_kwargs.copy()
         reduce_conv_kwargs['kernel_size'] = [1, 1]
         reduce_conv_kwargs['padding'] = [0, 0]
-        self.reduce_fm_conv = StackedConvLayers(480 + 512, 480, 1,
+        b_t, c_t, self.w_t, self.h_t = nn.Sequential(*self.conv_blocks_context)(torch.zeros((1, 3, 512, 512))).shape
+        b_e, c_e, w_e, h_e = self.context_encoder(torch.zeros((1, 3, 512, 512))).shape
+        self.ds_difference = int(np.log2(w_e) - np.log2(self.w_t))
+        self.upsample = Upsample(scale_factor=2 ** self.ds_difference, mode="bicubic")
+        self.reduce_fm_conv = StackedConvLayers(c_t + c_e, c_t, 1,
                                                 self.conv_op, reduce_conv_kwargs, self.norm_op,
                                                 self.norm_op_kwargs, self.dropout_op,
                                                 self.dropout_op_kwargs, self.nonlin, self.nonlin_kwargs,
                                                 basic_block=ConvDropoutNormNonlin)
+        del b_t, c_t, b_e, c_e, w_e, h_e
 
     def forward(self, x):
         main, context = x
@@ -67,13 +74,11 @@ class Generic_UNet_w_context(Generic_UNet):
         main_encoding = self.conv_blocks_context[-1](main)
         context_encoding = self.context_encoder(context)
 
-        start_x, start_y = (
-                torch.div(torch.tensor(context_encoding.shape[-2:]), 2, rounding_mode='trunc') -
-                torch.div(torch.tensor(main_encoding.shape[-2:]), 2, rounding_mode='floor')
-        ).type(torch.int)
-
-        w, h = main_encoding.shape[-2:]
-        x = torch.cat((crop(context_encoding, start_x, start_y, w, h), main_encoding), dim=1)
+        cropped = center_crop(context_encoding,
+                              output_size=[int(self.w_t * 2 ** -self.ds_difference),
+                                           int(self.h_t * 2 ** -self.ds_difference)])
+        upsampled = self.upsample(cropped)
+        x = torch.cat((upsampled, main_encoding), dim=1)
 
         x = self.reduce_fm_conv(x)
 
