@@ -50,7 +50,11 @@ class Generic_UNet_w_context(Generic_UNet):
         reduce_conv_kwargs = self.conv_kwargs.copy()
         reduce_conv_kwargs['kernel_size'] = [1, 1]
         reduce_conv_kwargs['padding'] = [0, 0]
-        b_t, c_t, self.w_t, self.h_t = nn.Sequential(*self.conv_blocks_context)(torch.zeros((1, 3, 512, 512))).shape
+
+        if self.convolutional_pooling:
+            b_t, c_t, self.w_t, self.h_t = nn.Sequential(*self.conv_blocks_context)(torch.zeros((1, 3, 512, 512))).shape
+        else:
+            b_t, c_t, self.w_t, self.h_t = nn.Sequential(*self.td)(torch.zeros((1, 3, 512, 512))).shape
         b_e, c_e, w_e, h_e = self.context_encoder(torch.zeros((1, 3, 512, 512))).shape
         self.ds_difference = int(np.log2(w_e) - np.log2(self.w_t))
         self.upsample = Upsample(scale_factor=2 ** self.ds_difference, mode="bicubic")
@@ -74,9 +78,11 @@ class Generic_UNet_w_context(Generic_UNet):
         main_encoding = self.conv_blocks_context[-1](main)
         context_encoding = self.context_encoder(context)
 
+        w, h = main_encoding.shape[-2:]
+
         cropped = center_crop(context_encoding,
-                              output_size=[int(self.w_t * 2 ** -self.ds_difference),
-                                           int(self.h_t * 2 ** -self.ds_difference)])
+                              output_size=[int(w * 2 ** -self.ds_difference),
+                                           int(h * 2 ** -self.ds_difference)])
         upsampled = self.upsample(cropped)
         x = torch.cat((upsampled, main_encoding), dim=1)
 
