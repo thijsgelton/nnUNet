@@ -19,16 +19,14 @@ import torch.nn.functional
 from batchgenerators.augmentations.utils import pad_nd_image
 from torch import nn
 from torch.cuda.amp import autocast
-from torchvision.transforms import CenterCrop
 from torchvision.transforms.functional import center_crop
-from torchvision.transforms.functional_tensor import crop
 
 from nnunet.network_architecture.generic_UNet import Generic_UNet, StackedConvLayers, ConvDropoutNormNonlin, Upsample
 from nnunet.utilities.random_stuff import no_op
 from nnunet.utilities.to_torch import maybe_to_torch, to_cuda
 
 
-class Generic_UNet_w_context(Generic_UNet):
+class GenericUNetMultiScale(Generic_UNet):
     DEFAULT_PATCH_SIZE_2D = (256, 256)
     BASE_NUM_FEATURES_2D = 30
     DEFAULT_BATCH_SIZE_2D = 50
@@ -45,7 +43,7 @@ class Generic_UNet_w_context(Generic_UNet):
          With 7 poolings the input of 0.5 mpp will be 2**-1 * 2**7 = 2**6 mpp. To braze the gap the encoded patch will be
          cropped by 2**2 = 2**(8-6).
         """
-        super(Generic_UNet_w_context, self).__init__(*args, **kwargs)
+        super(GenericUNetMultiScale, self).__init__(*args, **kwargs)
         self.context_encoder = context_encoder
         reduce_conv_kwargs = self.conv_kwargs.copy()
         reduce_conv_kwargs['kernel_size'] = [1, 1]
@@ -80,9 +78,11 @@ class Generic_UNet_w_context(Generic_UNet):
 
         w, h = main_encoding.shape[-2:]
 
-        cropped = center_crop(context_encoding,
-                              output_size=[int(w * 2 ** -self.ds_difference),
-                                           int(h * 2 ** -self.ds_difference)])
+        cropped = center_crop(context_encoding, output_size=[
+            int(w * 2 ** -self.ds_difference),
+            int(h * 2 ** -self.ds_difference)
+        ])
+
         upsampled = self.upsample(cropped)
         x = torch.cat((upsampled, main_encoding), dim=1)
 
