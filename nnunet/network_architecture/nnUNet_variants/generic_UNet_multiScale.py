@@ -52,7 +52,8 @@ class GenericUNetMultiScale(Generic_UNet):
         if self.convolutional_pooling:
             b_t, c_t, self.w_t, self.h_t = nn.Sequential(*self.conv_blocks_context)(torch.zeros((1, 3, 512, 512))).shape
         else:
-            b_t, c_t, self.w_t, self.h_t = nn.Sequential(*self.td)(torch.zeros((1, 3, 512, 512))).shape
+            b_t, c_t, _, _ = nn.Sequential(*self.conv_blocks_context)(torch.zeros((1, 3, 512, 512))).shape
+            _, _, self.w_t, self.h_t = nn.Sequential(*self.td)(torch.zeros((1, 3, 512, 512))).shape
         b_e, c_e, w_e, h_e = self.context_encoder(torch.zeros((1, 3, 512, 512))).shape
         self.ds_difference = int(np.log2(w_e) - np.log2(self.w_t))
         self.upsample = Upsample(scale_factor=2 ** self.ds_difference, mode="bicubic")
