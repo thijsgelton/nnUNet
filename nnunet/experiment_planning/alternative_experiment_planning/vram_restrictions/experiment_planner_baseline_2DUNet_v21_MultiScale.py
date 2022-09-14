@@ -65,7 +65,7 @@ class ExperimentPlanner2D_v21_MultiScale(ExperimentPlanner2D):
             tmp[axis_to_be_reduced] -= shape_must_be_divisible_by[axis_to_be_reduced]
             _, _, _, _, shape_must_be_divisible_by_new = \
                 get_pool_and_conv_props(current_spacing[1:], tmp, self.unet_featuremap_min_edge_length,
-                                        self.unet_max_numpool)
+                                        self.force_num_pools or self.unet_max_numpool)
             new_shp[axis_to_be_reduced] -= shape_must_be_divisible_by_new[axis_to_be_reduced]
             new_shp = [new_shp[axis_to_be_reduced]] * len(new_shp)
 
@@ -76,7 +76,7 @@ class ExperimentPlanner2D_v21_MultiScale(ExperimentPlanner2D):
             network_num_pool_per_axis, pool_op_kernel_sizes, conv_kernel_sizes, new_shp, \
             shape_must_be_divisible_by = get_pool_and_conv_props(current_spacing[1:], new_shp,
                                                                  self.unet_featuremap_min_edge_length,
-                                                                 self.unet_max_numpool)
+                                                                 self.force_num_pools or self.unet_max_numpool)
 
             here = Generic_UNet.compute_approx_vram_consumption(new_shp, network_num_pool_per_axis,
                                                                 self.unet_base_num_features,
