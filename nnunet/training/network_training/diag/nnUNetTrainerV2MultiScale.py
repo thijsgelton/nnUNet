@@ -33,12 +33,12 @@ from nnunet.evaluation.evaluator import aggregate_scores
 from nnunet.inference.segmentation_export import save_segmentation_nifti_from_softmax
 from nnunet.network_architecture.initialization import InitWeights_He
 from nnunet.network_architecture.neural_network import SegmentationNetwork
-from nnunet.network_architecture.nnUNet_variants.generic_UNet_w_context import Generic_UNet_w_context
+from nnunet.network_architecture.nnUNet_variants.generic_UNet_multiScale import GenericUNetMultiScale
 from nnunet.postprocessing.connected_components import determine_postprocessing
 from nnunet.training.data_augmentation.data_augmentation_noDA import get_no_augmentation
 from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params, \
     get_patch_size
-from nnunet.training.dataloading.dataset_loading import unpack_dataset
+from nnunet.training.dataloading.dataset_loading import unpack_dataset, DataLoader2D
 from nnunet.training.dataloading.diag.dataset_loading_insideroi import DataLoader2DROIs
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
@@ -56,9 +56,10 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
                  unpack_data=True, deterministic=True, fp16=False, data_origin=None, labels_dict=None, spacing=8.0,
-                 encoder_kwargs=None):
+                 encoder_kwargs=None, convolutional_pooling=True):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
+        self.convolutional_pooling = convolutional_pooling
         self.spacing = spacing
         self.labels_dict = labels_dict
         self.data_origin = data_origin
@@ -127,8 +128,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                     self.dl_tr, self.dl_val,
                     self.data_aug_params,
                     deep_supervision_scales=self.deep_supervision_scales,
-                    pin_memory=self.pin_memory,
-                    # use_nondetMultiThreadedAugmenter=False
+                    pin_memory=self.pin_memory
                 )
                 self.print_to_log_file("TRAINING KEYS:\n %s" % (str(self.dataset_tr.keys())),
                                        also_print_to_console=False)
@@ -148,11 +148,19 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
     def get_basic_generators(self):
         self.load_dataset()
         self.do_split()
-
-        dl_tr = DataLoader2DROIs(self.dataset_tr, self.basic_generator_patch_size, self.patch_size, self.batch_size,
+        _, w, h = self.plans['plans_per_stage'][0]['median_patient_size_in_voxels']
+        if h > self.patch_size[0] and w > self.patch_size[1]:
+            dl_tr = DataLoader2DROIs(self.dataset_tr, self.basic_generator_patch_size, self.patch_size, self.batch_size,
+                                     oversample_foreground_percent=self.oversample_foreground_percent,
+                                     pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r')
+            dl_val = DataLoader2DROIs(self.dataset_val, self.patch_size, self.patch_size, self.batch_size,
+                                      oversample_foreground_percent=self.oversample_foreground_percent,
+                                      pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r')
+        else:
+            dl_tr = DataLoader2D(self.dataset_tr, self.basic_generator_patch_size, self.patch_size, self.batch_size,
                                  oversample_foreground_percent=self.oversample_foreground_percent,
                                  pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r')
-        dl_val = DataLoader2DROIs(self.dataset_val, self.patch_size, self.patch_size, self.batch_size,
+            dl_val = DataLoader2D(self.dataset_val, self.patch_size, self.patch_size, self.batch_size,
                                   oversample_foreground_percent=self.oversample_foreground_percent,
                                   pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r')
         return dl_tr, dl_val
@@ -176,15 +184,15 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         dropout_op_kwargs = {'p': 0, 'inplace': True}
         net_nonlin = nn.LeakyReLU
         net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
-        self.network = Generic_UNet_w_context(self.encoder, self.num_input_channels, self.base_num_features,
-                                              self.num_classes,
-                                              len(self.net_num_pool_op_kernel_sizes),
-                                              self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
-                                              dropout_op_kwargs,
-                                              net_nonlin, net_nonlin_kwargs, True, False, lambda x: x,
-                                              InitWeights_He(1e-2),
-                                              self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes, False,
-                                              True, True)
+        self.network = GenericUNetMultiScale(self.encoder, self.num_input_channels, self.base_num_features,
+                                             self.num_classes,
+                                             len(self.net_num_pool_op_kernel_sizes),
+                                             self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
+                                             dropout_op_kwargs,
+                                             net_nonlin, net_nonlin_kwargs, True, False, lambda x: x,
+                                             InitWeights_He(1e-2),
+                                             self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes, False,
+                                             self.convolutional_pooling, self.convolutional_pooling)
         if torch.cuda.is_available():
             self.network.cuda()
         self.network.inference_apply_nonlin = softmax_helper
@@ -410,7 +418,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         :param run_online_evaluation:
         :return:
         """
-        data_dict = next(data_generator)  # Don't use zero-padding, sample bigger and then crop
+        data_dict = next(data_generator)
         main = data_dict['data']
         target = data_dict['target']
         context = self.sample_context(data_dict['properties'], data_dict['keys'])
@@ -560,8 +568,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                                   backend='asap')
             anno = wsa.sampling_annotations[anno_number]
             x, y = anno.center
-            x += props['offset_x']
-            y += props['offset_y']
+            x += props.get("offset_x", 0)
+            y += props.get("offset_y", 0)
             context[indx] = wsi.get_patch(
                 x,
                 y,
