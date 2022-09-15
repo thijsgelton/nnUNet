@@ -1,13 +1,17 @@
+import os
+from glob import glob
 from os.path import isfile
 
 import numpy as np
 from batchgenerators.utilities.file_and_folder_operations import load_pickle
+from wholeslidedata import WholeSlideAnnotation, WholeSlideImage
+from wholeslidedata.accessories.asap.parser import AsapAnnotationParser
 
 from nnunet.training.dataloading.dataset_loading import DataLoader2D
 
 
-class DataLoader2DROIs(DataLoader2D):
-    def __init__(self, *args, **kwargs):
+class DataLoader2DROIsMultiScale(DataLoader2D):
+    def __init__(self, data_origin, spacing, *args, **kwargs):
         """
         This is the basic data loader for 2D networks. It uses preprocessed data as produced by my (Fabian) preprocessing.
         You can load the data with load_dataset(folder) where folder is the folder where the npz files are located. If there
@@ -32,12 +36,15 @@ class DataLoader2DROIs(DataLoader2D):
         :param random: sample randomly; CAREFUL! non-random sampling requires batch_size=1, otherwise you will iterate batch_size times over the dataset
         :param pseudo_3d_slices: 7 = 3 below and 3 above the center slice
         """
-        super(DataLoader2DROIs, self).__init__(*args, **kwargs)
+        super(DataLoader2DROIsMultiScale, self).__init__(*args, **kwargs)
+        self.data_origin = data_origin
+        self.spacing = spacing
 
     def generate_train_batch(self):
         selected_keys = np.random.choice(self.list_of_keys, self.batch_size, True, None)
 
-        data = np.zeros(self.data_shape, dtype=np.float32)
+        b, c, w, h = self.data_shape
+        data = np.zeros((b, 2, c, w, h), dtype=np.float32)
         seg = np.zeros(self.seg_shape, dtype=np.float32)
 
         case_properties = []
@@ -130,7 +137,8 @@ class DataLoader2DROIs(DataLoader2D):
                     need_to_pad[d] = self.patch_size[d] - case_all_data.shape[d + 1]
 
             shape = case_all_data.shape[1:]
-            lb_x = 0  # Don't sample below this or you will get black borders (future: sample ROIs larger, since CP has a lot of WSI)
+            lb_x = 0  # Don't sample below this or you will get black borders
+            # (future: sample ROIs larger, since CP has a lot of WSI)
             ub_x = shape[0] - self.patch_size[0]
             lb_y = 0
             ub_y = shape[1] - self.patch_size[1]
@@ -185,8 +193,21 @@ class DataLoader2DROIs(DataLoader2D):
                                                                 (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0))),
                                            'constant', **{'constant_values': -1})
 
-            data[j] = case_all_data_donly
+            data[j] = np.stack([case_all_data_donly,
+                                self.sample_context(case_properties[j], selected_keys[j])])
             seg[j] = case_all_data_segonly
 
         keys = selected_keys
         return {'data': data, 'seg': seg, 'properties': case_properties, "keys": keys}
+
+    def sample_context(self, props, key):
+        parser = AsapAnnotationParser(labels={'none': 0}, sample_label_names=['none'])
+        anno_number = int(key.split("_")[-1].strip("ROI"))
+        file_identifier = os.path.join(self.data_origin, '_'.join(key.split('_')[:-1]))
+        wsa = WholeSlideAnnotation(glob(f"{file_identifier}.xml")[0], parser=parser)
+        wsi = WholeSlideImage(glob(f"{file_identifier}.tif")[0], backend='asap')
+        anno = wsa.sampling_annotations[anno_number]
+        x, y = anno.center
+        x += props.get("offset_x", 0)
+        y += props.get("offset_y", 0)
+        return wsi.get_patch(x, y, *self.patch_size, spacing=self.spacing).transpose(2, 0, 1) / 255.

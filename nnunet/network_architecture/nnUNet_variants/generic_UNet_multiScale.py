@@ -65,7 +65,8 @@ class GenericUNetMultiScale(Generic_UNet):
         del b_t, c_t, b_e, c_e, w_e, h_e
 
     def forward(self, x):
-        main, context = x
+        main = x[:, 0]
+        context = x[:, 1]
         skips = []
         seg_outputs = []
         for d in range(len(self.conv_blocks_context) - 1):

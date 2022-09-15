@@ -11,7 +11,6 @@
 #    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
-from glob import glob
 from multiprocessing import Pool
 from time import sleep
 from typing import Tuple
@@ -24,9 +23,6 @@ from mtdp import build_model
 from scipy.stats import zscore
 from torch import nn
 from torch.cuda.amp import autocast
-from wholeslidedata.accessories.asap.parser import AsapAnnotationParser
-from wholeslidedata.annotation.wholeslideannotation import WholeSlideAnnotation
-from wholeslidedata.image.wholeslideimage import WholeSlideImage
 
 from nnunet.configuration import default_num_threads
 from nnunet.evaluation.evaluator import aggregate_scores
@@ -35,14 +31,13 @@ from nnunet.network_architecture.initialization import InitWeights_He
 from nnunet.network_architecture.neural_network import SegmentationNetwork
 from nnunet.network_architecture.nnUNet_variants.generic_UNet_multiScale import GenericUNetMultiScale
 from nnunet.postprocessing.connected_components import determine_postprocessing
-from nnunet.training.data_augmentation.data_augmentation_noDA import get_no_augmentation
-from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params, \
-    get_patch_size
-from nnunet.training.dataloading.dataset_loading import unpack_dataset, DataLoader2D
-from nnunet.training.dataloading.diag.dataset_loading_insideroi import DataLoader2DROIs
+from nnunet.training.data_augmentation.data_augmentation_moreDA_pathology_no_spatial import \
+    get_moreDA_augmentation_pathology_no_spatial
+from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params
+from nnunet.training.dataloading.dataset_loading import unpack_dataset
+from nnunet.training.dataloading.diag.dataset_loading_insideroi_multiscale import DataLoader2DROIsMultiScale
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
-from nnunet.training.network_training.nnUNetTrainer import nnUNetTrainer
 from nnunet.training.network_training.nnUNetTrainerV2 import nnUNetTrainerV2
 from nnunet.utilities import shutil_sol
 from nnunet.utilities.nd_softmax import softmax_helper
@@ -123,10 +118,10 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                         "INFO: Not unpacking data! Training may be slow due to that. Pray you are not using 2d or you "
                         "will wait all winter for your model to finish!")
 
-                # Starting with no augmentation. This could disturb the training due to misalignment
-                self.tr_gen, self.val_gen = get_no_augmentation(  # get_moreDA_augmentation
+                # Only color and simple spatial transforms. Otherwise misalignment of the context and target patches could happen
+                self.tr_gen, self.val_gen = get_moreDA_augmentation_pathology_no_spatial(
                     self.dl_tr, self.dl_val,
-                    self.data_aug_params,
+                    params=self.data_aug_params,
                     deep_supervision_scales=self.deep_supervision_scales,
                     pin_memory=self.pin_memory
                 )
@@ -148,21 +143,29 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
     def get_basic_generators(self):
         self.load_dataset()
         self.do_split()
-        _, w, h = self.plans['plans_per_stage'][0]['median_patient_size_in_voxels']
-        if h > self.patch_size[0] and w > self.patch_size[1]:
-            dl_tr = DataLoader2DROIs(self.dataset_tr, self.basic_generator_patch_size, self.patch_size, self.batch_size,
-                                     oversample_foreground_percent=self.oversample_foreground_percent,
-                                     pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r')
-            dl_val = DataLoader2DROIs(self.dataset_val, self.patch_size, self.patch_size, self.batch_size,
-                                      oversample_foreground_percent=self.oversample_foreground_percent,
-                                      pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r')
-        else:
-            dl_tr = DataLoader2D(self.dataset_tr, self.basic_generator_patch_size, self.patch_size, self.batch_size,
-                                 oversample_foreground_percent=self.oversample_foreground_percent,
-                                 pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r')
-            dl_val = DataLoader2D(self.dataset_val, self.patch_size, self.patch_size, self.batch_size,
-                                  oversample_foreground_percent=self.oversample_foreground_percent,
-                                  pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r')
+        dl_tr = DataLoader2DROIsMultiScale(
+            self.data_origin,
+            self.spacing,
+            self.dataset_tr,
+            self.basic_generator_patch_size,
+            self.patch_size,
+            self.batch_size,
+            oversample_foreground_percent=self.oversample_foreground_percent,
+            pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r'
+        )
+        dl_val = DataLoader2DROIsMultiScale(
+            self.data_origin,
+            self.spacing,
+            self.dataset_val,
+            self.patch_size,
+            self.patch_size,
+            self.batch_size,
+            oversample_foreground_percent=self.oversample_foreground_percent,
+            pad_mode="constant",
+            pad_sides=self.pad_all_sides,
+            memmap_mode='r'
+        )
+
         return dl_tr, dl_val
 
     def initialize_network(self):
@@ -185,14 +188,12 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         net_nonlin = nn.LeakyReLU
         net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
         self.network = GenericUNetMultiScale(self.encoder, self.num_input_channels, self.base_num_features,
-                                             self.num_classes,
-                                             len(self.net_num_pool_op_kernel_sizes),
+                                             self.num_classes, len(self.net_num_pool_op_kernel_sizes),
                                              self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
-                                             dropout_op_kwargs,
-                                             net_nonlin, net_nonlin_kwargs, True, False, lambda x: x,
-                                             InitWeights_He(1e-2),
-                                             self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes, False,
-                                             self.convolutional_pooling, self.convolutional_pooling)
+                                             dropout_op_kwargs, net_nonlin, net_nonlin_kwargs, True, False, lambda x: x,
+                                             InitWeights_He(1e-2), self.net_num_pool_op_kernel_sizes,
+                                             self.net_conv_kernel_sizes, False, self.convolutional_pooling,
+                                             self.convolutional_pooling)
         if torch.cuda.is_available():
             self.network.cuda()
         self.network.inference_apply_nonlin = softmax_helper
@@ -419,25 +420,22 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         :return:
         """
         data_dict = next(data_generator)
-        main = data_dict['data']
+        data = data_dict['data']
         target = data_dict['target']
-        context = self.sample_context(data_dict['properties'], data_dict['keys'])
 
-        main = maybe_to_torch(main)
-        context = maybe_to_torch(context)
+        data = maybe_to_torch(data)
         target = maybe_to_torch(target)
 
         if torch.cuda.is_available():
-            main = to_cuda(main)
+            data = to_cuda(data)
             target = to_cuda(target)
-            context = to_cuda(context)
 
         self.optimizer.zero_grad()
 
         if self.fp16:
             with autocast():
-                output = self.network((main, context))
-                del main, context
+                output = self.network(data)
+                del data
                 l = self.loss(output, target)
 
             if do_backprop:
@@ -447,8 +445,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                 self.amp_grad_scaler.step(self.optimizer)
                 self.amp_grad_scaler.update()
         else:
-            output = self.network((main, context))
-            del main, context
+            output = self.network(data)
+            del data
             l = self.loss(output, target)
 
             if do_backprop:
@@ -474,31 +472,21 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
         self.deep_supervision_scales = [[1, 1, 1]] + list(list(i) for i in 1 / np.cumprod(
             np.vstack(self.net_num_pool_op_kernel_sizes), axis=0))[:-1]
-        self.do_dummy_2D_aug = False
-        if max(self.patch_size) / min(self.patch_size) > 1.5:
-            default_2D_augmentation_params['rotation_x'] = (-15. / 360 * 2. * np.pi, 15. / 360 * 2. * np.pi)
         self.data_aug_params = default_2D_augmentation_params
         self.data_aug_params["mask_was_used_for_normalization"] = self.use_mask_for_norm
-        self.data_aug_params["scale_range"] = (1.0, 1.0)
-
-        if self.do_dummy_2D_aug:
-            self.basic_generator_patch_size = get_patch_size(self.patch_size[1:],
-                                                             self.data_aug_params['rotation_x'],
-                                                             self.data_aug_params['rotation_y'],
-                                                             self.data_aug_params['rotation_z'],
-                                                             self.data_aug_params['scale_range'])
-            self.basic_generator_patch_size = np.array([self.patch_size[0]] + list(self.basic_generator_patch_size))
-        else:
-            self.basic_generator_patch_size = get_patch_size(self.patch_size, self.data_aug_params['rotation_x'],
-                                                             self.data_aug_params['rotation_y'],
-                                                             self.data_aug_params['rotation_z'],
-                                                             self.data_aug_params['scale_range'])
-
-        # self.data_aug_params["scale_range"] = (0.7, 1.4)
+        self.data_aug_params["do_scaling"] = False
+        self.data_aug_params["do_rotation"] = False
         self.data_aug_params["do_elastic"] = False
+        self.data_aug_params["do_gamma"] = False
+        self.data_aug_params["do_additive_brightness"] = True
+        self.data_aug_params["do_mirror"] = True
+        self.basic_generator_patch_size = self.patch_size
+        self.data_aug_params["do_hed"] = True
+        self.data_aug_params["hed_params"] = dict(factor=0.05)
+        self.data_aug_params["do_hsv"] = False
+        self.data_aug_params["hsv_params"] = dict(h_lim=0.01, s_lim=0.01, v_lim=0.05)
         self.data_aug_params['selected_seg_channels'] = [0]
         self.data_aug_params['patch_size_for_spatialtransform'] = self.patch_size
-
         self.data_aug_params["num_cached_per_thread"] = 2
 
     def maybe_update_lr(self, epoch=None):
@@ -556,27 +544,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         ret = super().run_training()
         self.network.do_ds = ds
         return ret
-
-    def sample_context(self, properties, keys):
-        parser = AsapAnnotationParser(labels={'none': 0}, sample_label_names=['none'])
-        context = np.zeros((len(properties), self.plans['num_modalities'], *self.patch_size))
-        for indx, props in enumerate(properties):
-            anno_number = int(keys[indx].split("_")[-1].strip("ROI"))
-            wsa = WholeSlideAnnotation(glob(f"{self.data_origin}/{'_'.join(keys[indx].split('_')[:-1])}.xml")[0],
-                                       parser=parser)
-            wsi = WholeSlideImage(glob(f"{self.data_origin}/{'_'.join(keys[indx].split('_')[:-1])}.tif")[0],
-                                  backend='asap')
-            anno = wsa.sampling_annotations[anno_number]
-            x, y = anno.center
-            x += props.get("offset_x", 0)
-            y += props.get("offset_y", 0)
-            context[indx] = wsi.get_patch(
-                x,
-                y,
-                *self.patch_size,
-                spacing=self.spacing
-            ).transpose(2, 0, 1) / 255.
-        return context
 
     @staticmethod
     def z_score_norm(array: np.ndarray):
