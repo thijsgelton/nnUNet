@@ -58,6 +58,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.spacing = spacing
         self.labels_dict = labels_dict
         self.data_origin = data_origin
+        self.save_every = 5
         if encoder_kwargs is None:
             print("Since encoder_kwargs is empty, we will use the default: resnet18 with imagenet weights.")
             encoder_kwargs = {"arch": "resnet18", "pretrained": "imagenet"}
