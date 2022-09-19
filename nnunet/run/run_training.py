@@ -189,6 +189,7 @@ def main():
             else:
                 trainer.load_final_checkpoint(train=False)
 
+        trainer.load_best_checkpoint(train=False)  # Why not load the best model?
         trainer.network.eval()
 
         # predict validation

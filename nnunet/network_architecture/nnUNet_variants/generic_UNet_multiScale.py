@@ -35,7 +35,7 @@ class GenericUNetMultiScale(Generic_UNet):
 
     use_this_for_batch_size_computation_2D = 19739648
 
-    def __init__(self, context_encoder: torch.nn.Module, *args, **kwargs):
+    def __init__(self, context_encoder: torch.nn.Module, ct_spacing, tg_spacing, *args, **kwargs):
         """
         First version that uses a CNN to encode context around the main patch. Assuming that the following formula holds:
         Encoder contains 5 downsamplings and the input patch is at 8.0 mpp. This results in 2**3 * 2**5 = 2**8 mpp patch
@@ -55,7 +55,7 @@ class GenericUNetMultiScale(Generic_UNet):
             b_t, c_t, _, _ = nn.Sequential(*self.conv_blocks_context)(torch.zeros((1, 3, 512, 512))).shape
             _, _, self.w_t, self.h_t = nn.Sequential(*self.td)(torch.zeros((1, 3, 512, 512))).shape
         b_e, c_e, w_e, h_e = self.context_encoder(torch.zeros((1, 3, 512, 512))).shape
-        self.ds_difference = int(np.log2(w_e) - np.log2(self.w_t))
+        self.ds_difference = int(np.log2(ct_spacing) - np.log2(tg_spacing) - (np.log2(w_e) - np.log2(self.w_t)))
         self.upsample = Upsample(scale_factor=2 ** self.ds_difference, mode="bicubic")
         self.reduce_fm_conv = StackedConvLayers(c_t + c_e, c_t, 1,
                                                 self.conv_op, reduce_conv_kwargs, self.norm_op,
@@ -132,15 +132,15 @@ class GenericUNetMultiScale(Generic_UNet):
                 result_torch += 1 / num_results * pred
 
             if m == 1 and (1 in mirror_axes):
-                pred = self.inference_apply_nonlin(self(torch.flip(x, (3,))))
+                pred = self.inference_apply_nonlin(self(torch.flip(x, (4,))))
                 result_torch += 1 / num_results * torch.flip(pred, (3,))
 
                 if m == 2 and (0 in mirror_axes):
-                    pred = self.inference_apply_nonlin(self(torch.flip(x, (2,))))
+                    pred = self.inference_apply_nonlin(self(torch.flip(x, (3,))))
                 result_torch += 1 / num_results * torch.flip(pred, (2,))
 
                 if m == 3 and (0 in mirror_axes) and (1 in mirror_axes):
-                    pred = self.inference_apply_nonlin(self(torch.flip(x, (3, 2))))
+                    pred = self.inference_apply_nonlin(self(torch.flip(x, (4, 3))))
                 result_torch += 1 / num_results * torch.flip(pred, (3, 2))
 
                 if mult is not None:

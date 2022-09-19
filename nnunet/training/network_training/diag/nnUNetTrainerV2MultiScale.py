@@ -51,11 +51,12 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
                  unpack_data=True, deterministic=True, fp16=False, data_origin=None, labels_dict=None, spacing=8.0,
-                 encoder_kwargs=None, convolutional_pooling=True):
+                 target_spacing=0.5, encoder_kwargs=None, convolutional_pooling=True):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
         self.convolutional_pooling = convolutional_pooling
         self.spacing = spacing
+        self.target_spacing = target_spacing
         self.labels_dict = labels_dict
         self.data_origin = data_origin
         self.save_every = 5
@@ -109,27 +110,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             self.folder_with_preprocessed_data = join(self.dataset_directory, self.plans['data_identifier'] +
                                                       "_stage%d" % self.stage)
             if training:
-                self.dl_tr, self.dl_val = self.get_basic_generators()
-                if self.unpack_data:
-                    print("unpacking dataset")
-                    unpack_dataset(self.folder_with_preprocessed_data)
-                    print("done")
-                else:
-                    print(
-                        "INFO: Not unpacking data! Training may be slow due to that. Pray you are not using 2d or you "
-                        "will wait all winter for your model to finish!")
-
-                # Only color and simple spatial transforms. Otherwise misalignment of the context and target patches could happen
-                self.tr_gen, self.val_gen = get_moreDA_augmentation_pathology_no_spatial(
-                    self.dl_tr, self.dl_val,
-                    params=self.data_aug_params,
-                    deep_supervision_scales=self.deep_supervision_scales,
-                    pin_memory=self.pin_memory
-                )
-                self.print_to_log_file("TRAINING KEYS:\n %s" % (str(self.dataset_tr.keys())),
-                                       also_print_to_console=False)
-                self.print_to_log_file("VALIDATION KEYS:\n %s" % (str(self.dataset_val.keys())),
-                                       also_print_to_console=False)
+                self.prepare_data()
             else:
                 pass
 
@@ -140,6 +121,28 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         else:
             self.print_to_log_file('self.was_initialized is True, not running self.initialize again')
         self.was_initialized = True
+
+    def prepare_data(self):
+        self.dl_tr, self.dl_val = self.get_basic_generators()
+        if self.unpack_data:
+            print("unpacking dataset")
+            unpack_dataset(self.folder_with_preprocessed_data)
+            print("done")
+        else:
+            print(
+                "INFO: Not unpacking data! Training may be slow due to that. Pray you are not using 2d or you "
+                "will wait all winter for your model to finish!")
+        # Only color and simple spatial transforms. Otherwise misalignment of the context and target patches could happen
+        self.tr_gen, self.val_gen = get_moreDA_augmentation_pathology_no_spatial(
+            self.dl_tr, self.dl_val,
+            params=self.data_aug_params,
+            deep_supervision_scales=self.deep_supervision_scales,
+            pin_memory=self.pin_memory
+        )
+        self.print_to_log_file("TRAINING KEYS:\n %s" % (str(self.dataset_tr.keys())),
+                               also_print_to_console=False)
+        self.print_to_log_file("VALIDATION KEYS:\n %s" % (str(self.dataset_val.keys())),
+                               also_print_to_console=False)
 
     def get_basic_generators(self):
         self.load_dataset()
@@ -192,7 +195,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         dropout_op_kwargs = {'p': 0, 'inplace': True}
         net_nonlin = nn.LeakyReLU
         net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
-        self.network = GenericUNetMultiScale(self.encoder, self.num_input_channels, self.base_num_features,
+        self.network = GenericUNetMultiScale(self.encoder, self.spacing, self.target_spacing, self.num_input_channels,
+                                             self.base_num_features,
                                              self.num_classes, len(self.net_num_pool_op_kernel_sizes),
                                              self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
                                              dropout_op_kwargs, net_nonlin, net_nonlin_kwargs, True, False, lambda x: x,
@@ -219,6 +223,9 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
         current_mode = self.network.training
         self.network.eval()
+
+        if not self.val_gen:
+            self.prepare_data()
 
         assert self.was_initialized, "must initialize, ideally with checkpoint (or train first)"
         if self.dataset_val is None:
@@ -277,14 +284,14 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
                 print(data_dict['keys'], data.shape)
 
-                softmax_pred = self.predict_preprocessed_data_return_seg_and_softmax(data,
-                                                                                     do_mirroring=do_mirroring,
-                                                                                     mirror_axes=mirror_axes,
-                                                                                     use_sliding_window=use_sliding_window,
-                                                                                     step_size=step_size,
-                                                                                     use_gaussian=use_gaussian,
-                                                                                     all_in_gpu=all_in_gpu,
-                                                                                     mixed_precision=self.fp16)[1]
+                pred, softmax_pred = self.predict_preprocessed_data_return_seg_and_softmax(data,
+                                                                                           do_mirroring=do_mirroring,
+                                                                                           mirror_axes=mirror_axes,
+                                                                                           use_sliding_window=use_sliding_window,
+                                                                                           step_size=step_size,
+                                                                                           use_gaussian=use_gaussian,
+                                                                                           all_in_gpu=all_in_gpu,
+                                                                                           mixed_precision=self.fp16)
 
                 softmax_pred = softmax_pred.transpose([0] + [i + 1 for i in self.transpose_backward])
 
