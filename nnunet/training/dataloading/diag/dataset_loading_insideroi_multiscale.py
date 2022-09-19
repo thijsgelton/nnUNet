@@ -11,7 +11,7 @@ from nnunet.training.dataloading.dataset_loading import DataLoader2D
 
 
 class DataLoader2DROIsMultiScale(DataLoader2D):
-    def __init__(self, data_origin, spacing, *args, **kwargs):
+    def __init__(self, data_origin, spacing, crop_to_patch_size=True, training=True, *args, **kwargs):
         """
         This is the basic data loader for 2D networks. It uses preprocessed data as produced by my (Fabian) preprocessing.
         You can load the data with load_dataset(folder) where folder is the folder where the npz files are located. If there
@@ -36,9 +36,14 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
         :param random: sample randomly; CAREFUL! non-random sampling requires batch_size=1, otherwise you will iterate batch_size times over the dataset
         :param pseudo_3d_slices: 7 = 3 below and 3 above the center slice
         """
-        super(DataLoader2DROIsMultiScale, self).__init__(*args, **kwargs)
+        self.training = training
+        self.crop_to_patch_size = crop_to_patch_size
         self.data_origin = data_origin
         self.spacing = spacing
+        super(DataLoader2DROIsMultiScale, self).__init__(*args, **kwargs)
+
+    def __next__(self):
+        return self.generate_train_batch() if self.training else self.generate_single_roi()
 
     def generate_train_batch(self):
         selected_keys = np.random.choice(self.list_of_keys, self.batch_size, True, None)
@@ -55,80 +60,17 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
                 properties = load_pickle(self._data[i]['properties_file'])
             case_properties.append(properties)
 
-            if self.get_do_oversample(j):
-                force_fg = True
-            else:
-                force_fg = False
-
             if not isfile(self._data[i]['data_file'][:-4] + ".npy"):
                 # lets hope you know what you're doing
-                case_all_data = np.load(self._data[i]['data_file'][:-4] + ".npz")['data']
+                case_all_data = np.load(self._data[i]['data_file'][:-4] + ".npz")['data'][:, None][:, 0]
             else:
-                case_all_data = np.load(self._data[i]['data_file'][:-4] + ".npy", self.memmap_mode)
-
-            # this is for when there is just a 2d slice in case_all_data (2d support)
-            if len(case_all_data.shape) == 3:
-                case_all_data = case_all_data[:, None]
-
-            # first select a slice. This can be either random (no force fg) or guaranteed to contain some class
-            if not force_fg:
-                random_slice = np.random.choice(case_all_data.shape[1])
-                selected_class = None
-            else:
-                # these values should have been precomputed
-                if 'class_locations' not in properties.keys():
-                    raise RuntimeError("Please rerun the preprocessing with the newest version of nnU-Net!")
-
-                foreground_classes = np.array(
-                    [i for i in properties['class_locations'].keys() if len(properties['class_locations'][i]) != 0])
-                foreground_classes = foreground_classes[foreground_classes > 0]
-                if len(foreground_classes) == 0:
-                    selected_class = None
-                    random_slice = np.random.choice(case_all_data.shape[1])
-                    print('case does not contain any foreground classes', i)
-                else:
-                    selected_class = np.random.choice(foreground_classes)
-
-                    voxels_of_that_class = properties['class_locations'][selected_class]
-                    valid_slices = np.unique(voxels_of_that_class[:, 0])
-                    random_slice = np.random.choice(valid_slices)
-                    voxels_of_that_class = voxels_of_that_class[voxels_of_that_class[:, 0] == random_slice]
-                    voxels_of_that_class = voxels_of_that_class[:, 1:]
-
-            # now crop case_all_data to contain just the slice of interest. If we want additional slice above and
-            # below the current slice, here is where we get them. We stack those as additional color channels
-            if self.pseudo_3d_slices == 1:
-                case_all_data = case_all_data[:, random_slice]
-            else:
-                # this is very deprecated and will probably not work anymore. If you intend to use this you need to
-                # check this!
-                mn = random_slice - (self.pseudo_3d_slices - 1) // 2
-                mx = random_slice + (self.pseudo_3d_slices - 1) // 2 + 1
-                valid_mn = max(mn, 0)
-                valid_mx = min(mx, case_all_data.shape[1])
-                case_all_seg = case_all_data[-1:]
-                case_all_data = case_all_data[:-1]
-                case_all_data = case_all_data[:, valid_mn:valid_mx]
-                case_all_seg = case_all_seg[:, random_slice]
-                need_to_pad_below = valid_mn - mn
-                need_to_pad_above = mx - valid_mx
-                if need_to_pad_below > 0:
-                    shp_for_pad = np.array(case_all_data.shape)
-                    shp_for_pad[1] = need_to_pad_below
-                    case_all_data = np.concatenate((np.zeros(shp_for_pad), case_all_data), 1)
-                if need_to_pad_above > 0:
-                    shp_for_pad = np.array(case_all_data.shape)
-                    shp_for_pad[1] = need_to_pad_above
-                    case_all_data = np.concatenate((case_all_data, np.zeros(shp_for_pad)), 1)
-                case_all_data = case_all_data.reshape((-1, case_all_data.shape[-2], case_all_data.shape[-1]))
-                case_all_data = np.concatenate((case_all_data, case_all_seg), 0)
+                case_all_data = np.load(self._data[i]['data_file'][:-4] + ".npy", self.memmap_mode)[:, 0]
 
             # case all data should now be (c, x, y)
             assert len(case_all_data.shape) == 3
 
             # we can now choose the bbox from -need_to_pad // 2 to shape - patch_size + need_to_pad // 2. Here we
             # define what the upper and lower bound can be to then sample from them with np.random.randint
-
             need_to_pad = self.need_to_pad.copy()
             for d in range(2):
                 # if case_all_data.shape + need_to_pad is still < patch size we need to pad more! We pad on both sides
@@ -145,16 +87,8 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
 
             # if not force_fg then we can just sample the bbox randomly from lb and ub. Else we need to make sure we get
             # at least one of the foreground classes in the patch
-            if not force_fg or selected_class is None:
-                bbox_x_lb = np.random.randint(lb_x, ub_x + 1)
-                bbox_y_lb = np.random.randint(lb_y, ub_y + 1)
-            else:
-                # this saves us a np.unique. Preprocessing already did that for all cases. Neat.
-                selected_voxel = voxels_of_that_class[np.random.choice(len(voxels_of_that_class))]
-                # selected voxel is center voxel. Subtract half the patch size to get lower bbox voxel.
-                # Make sure it is within the bounds of lb and ub
-                bbox_x_lb = max(lb_x, selected_voxel[0] - self.patch_size[0])
-                bbox_y_lb = max(lb_y, selected_voxel[1] - self.patch_size[1])
+            bbox_x_lb = np.random.randint(lb_x, ub_x + 1)
+            bbox_y_lb = np.random.randint(lb_y, ub_y + 1)
 
             bbox_x_ub = bbox_x_lb + self.patch_size[0]
             bbox_y_ub = bbox_y_lb + self.patch_size[1]
@@ -178,7 +112,8 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
             offset_x = (valid_bbox_x_lb + (valid_bbox_x_ub - valid_bbox_x_lb) // 2) - width // 2
             offset_y = (valid_bbox_y_lb + (valid_bbox_y_ub - valid_bbox_y_lb) // 2) - height // 2
 
-            case_properties[j]['offset_x'] = int(offset_y)  # This is correct, not sure why x and y need to be swapped
+            case_properties[j]['offset_x'] = int(
+                offset_y)  # This is correct, not sure why x and y need to be swapped
             case_properties[j]['offset_y'] = int(offset_x)
 
             case_all_data = case_all_data[:, valid_bbox_x_lb:valid_bbox_x_ub, valid_bbox_y_lb:valid_bbox_y_ub]
@@ -194,13 +129,38 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
                                            'constant', **{'constant_values': -1})
 
             data[j] = np.stack([case_all_data_donly,
-                                self.sample_context(case_properties[j], selected_keys[j])])
+                                self.sample_context(case_properties[j], selected_keys[j],
+                                                    case_all_data_donly.shape[-2:])])
             seg[j] = case_all_data_segonly
 
         keys = selected_keys
         return {'data': data, 'seg': seg, 'properties': case_properties, "keys": keys}
 
-    def sample_context(self, props, key):
+    def generate_single_roi(self):
+        if not len(self.list_of_keys):
+            raise StopIteration
+        selected_key = self.list_of_keys.pop()
+
+        if 'properties' in self._data[selected_key].keys():
+            properties = self._data[selected_key]['properties']
+        else:
+            properties = load_pickle(self._data[selected_key]['properties_file'])
+
+        if not isfile(self._data[selected_key]['data_file'][:-4] + ".npy"):
+            case_all_data = np.load(self._data[selected_key]['data_file'][:-4] + ".npz")['data'][:, None][:, 0]
+        else:
+            case_all_data = np.load(self._data[selected_key]['data_file'][:-4] + ".npy", self.memmap_mode)[:, 0]
+
+        c, w, h = case_all_data.shape
+
+        data = np.stack([case_all_data[:-1], self.sample_context(properties, selected_key, (w, h))])
+
+        return {'data': data[np.newaxis],
+                'seg': np.array(case_all_data[-1:])[np.newaxis],
+                'properties': properties,
+                "keys": [selected_key]}
+
+    def sample_context(self, props, key, shape=None):
         parser = AsapAnnotationParser(labels={'none': 0}, sample_label_names=['none'])
         anno_number = int(key.split("_")[-1].strip("ROI"))
         file_identifier = os.path.join(self.data_origin, '_'.join(key.split('_')[:-1]))
@@ -210,4 +170,4 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
         x, y = anno.center
         x += props.get("offset_x", 0)
         y += props.get("offset_y", 0)
-        return wsi.get_patch(x, y, *self.patch_size, spacing=self.spacing).transpose(2, 0, 1) / 255.
+        return wsi.get_patch(x, y, *shape[::-1], spacing=self.spacing).transpose(2, 0, 1) / 255.

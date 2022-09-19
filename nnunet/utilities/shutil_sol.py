@@ -7,6 +7,7 @@ support that. This module defines replacement functions.
 
 import os
 import shutil
+from pathlib import Path
 
 
 def copyfile(src, dst, **kwargs):
@@ -33,5 +34,17 @@ def copytree(src, dst, ignore=None):
 
         if len(non_permission_errors) > 0:
             raise shutil.Error(non_permission_errors)
-        
+
     return dst
+
+
+if __name__ == "__main__":
+    import argparse
+
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("input_directory", action="store_true")
+    # parser.add_argument("output_directory", action="store_true")
+    # args = parser.parse_args()
+    # if not os.path.exists(args.output_directory):
+    #     Path(args.output_directory).mkdir(parents=True, exist_ok=True)
+    copytree("/data/pathology/projects/pathology-endoaid/phase 3 - nnUNet/nnUNet_raw_data_base_6cl_revised/nnUNet_preprocessed/Task501_endometrium_carcinoma_segmentation", "/home/user/data/nnUNet_preprocessed/Task501_endometrium_carcinoma_segmentation")

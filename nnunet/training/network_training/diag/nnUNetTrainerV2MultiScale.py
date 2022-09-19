@@ -145,26 +145,30 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.load_dataset()
         self.do_split()
         dl_tr = DataLoader2DROIsMultiScale(
-            self.data_origin,
-            self.spacing,
-            self.dataset_tr,
-            self.basic_generator_patch_size,
-            self.patch_size,
-            self.batch_size,
-            oversample_foreground_percent=self.oversample_foreground_percent,
-            pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r'
-        )
-        dl_val = DataLoader2DROIsMultiScale(
-            self.data_origin,
-            self.spacing,
-            self.dataset_val,
-            self.patch_size,
-            self.patch_size,
-            self.batch_size,
+            data_origin=self.data_origin,
+            spacing=self.spacing,
+            data=self.dataset_tr,
+            final_patch_size=self.basic_generator_patch_size,
+            patch_size=self.patch_size,
+            batch_size=self.batch_size,
             oversample_foreground_percent=self.oversample_foreground_percent,
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
             memmap_mode='r'
+        )
+        dl_val = DataLoader2DROIsMultiScale(
+            data_origin=self.data_origin,
+            spacing=self.spacing,
+            data=self.dataset_val,
+            final_patch_size=self.patch_size,
+            patch_size=self.patch_size,
+            batch_size=self.batch_size,
+            oversample_foreground_percent=self.oversample_foreground_percent,
+            pad_mode="constant",
+            pad_sides=self.pad_all_sides,
+            memmap_mode='r',
+            training=False,
+            crop_to_patch_size=False
         )
 
         return dl_tr, dl_val
@@ -264,25 +268,23 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         export_pool = Pool(default_num_threads)
         results = []
 
-        for k in self.dataset_val.keys():
-            properties = load_pickle(self.dataset[k]['properties_file'])
+        for data_dict in self.val_gen:
+            properties = data_dict['properties']
             fname = properties['list_of_data_files'][0].split("/")[-1][:-12]
             if overwrite or (not isfile(join(output_folder, fname + ".nii.gz"))) or \
                     (save_softmax and not isfile(join(output_folder, fname + ".npz"))):
-                data = np.load(self.dataset[k]['data_file'])['data']
+                data = data_dict['data'][0]
 
-                print(k, data.shape)
-                data[-1][data[-1] == -1] = 0
+                print(data_dict['keys'], data.shape)
 
-                softmax_pred = self.predict_preprocessed_data_return_seg_and_softmax(data[:-1],
+                softmax_pred = self.predict_preprocessed_data_return_seg_and_softmax(data,
                                                                                      do_mirroring=do_mirroring,
                                                                                      mirror_axes=mirror_axes,
                                                                                      use_sliding_window=use_sliding_window,
                                                                                      step_size=step_size,
                                                                                      use_gaussian=use_gaussian,
                                                                                      all_in_gpu=all_in_gpu,
-                                                                                     mixed_precision=self.fp16,
-                                                                                     **{"key": [k]})[1]
+                                                                                     mixed_precision=self.fp16)[1]
 
                 softmax_pred = softmax_pred.transpose([0] + [i + 1 for i in self.transpose_backward])
 
@@ -368,8 +370,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                                                          use_sliding_window: bool = True, step_size: float = 0.5,
                                                          use_gaussian: bool = True, pad_border_mode: str = 'constant',
                                                          pad_kwargs: dict = None, all_in_gpu: bool = False,
-                                                         verbose: bool = True, mixed_precision: bool = True,
-                                                         **kwargs) -> Tuple[np.ndarray, np.ndarray]:
+                                                         verbose: bool = True, mixed_precision: bool = True) -> Tuple[
+        np.ndarray, np.ndarray]:
         """
         :param data:
         :param do_mirroring:
@@ -400,13 +402,12 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.network.do_ds = False
         current_mode = self.network.training
         self.network.eval()
-        kwargs['trainer'] = self
         ret = self.network.predict_3D(data, do_mirroring=do_mirroring, mirror_axes=mirror_axes,
                                       use_sliding_window=use_sliding_window, step_size=step_size,
                                       patch_size=self.patch_size, regions_class_order=self.regions_class_order,
                                       use_gaussian=use_gaussian, pad_border_mode=pad_border_mode,
                                       pad_kwargs=pad_kwargs, all_in_gpu=all_in_gpu, verbose=verbose,
-                                      mixed_precision=mixed_precision, **kwargs)
+                                      mixed_precision=mixed_precision)
         self.network.do_ds = ds
         self.network.train(current_mode)
         return ret

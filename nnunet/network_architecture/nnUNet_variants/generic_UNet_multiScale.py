@@ -104,12 +104,11 @@ class GenericUNetMultiScale(Generic_UNet):
 
     def _internal_maybe_mirror_and_pred_2D(self, x: Union[np.ndarray, torch.tensor], mirror_axes: tuple,
                                            do_mirroring: bool = True,
-                                           mult: Union[np.ndarray, torch.tensor] = None, **kwargs) -> torch.tensor:
-        assert len(x.shape) == 4, 'x must be (b, c, x, y)'
+                                           mult: Union[np.ndarray, torch.tensor] = None) -> torch.tensor:
+        assert len(x.shape) == 5, 'x must be (b, modality, c, x, y)'
 
         x = maybe_to_torch(x)
-        context = kwargs['context']
-        result_torch = torch.zeros([x.shape[0], self.num_classes] + list(x.shape[2:]), dtype=torch.float)
+        result_torch = torch.zeros([x.shape[0], self.num_classes] + list(x.shape[3:]), dtype=torch.float)
 
         if torch.cuda.is_available():
             x = to_cuda(x, gpu_id=self.get_device())
@@ -129,19 +128,19 @@ class GenericUNetMultiScale(Generic_UNet):
 
         for m in range(mirror_idx):
             if m == 0:
-                pred = self.inference_apply_nonlin(self((x, context)))
+                pred = self.inference_apply_nonlin(self(x))
                 result_torch += 1 / num_results * pred
 
             if m == 1 and (1 in mirror_axes):
-                pred = self.inference_apply_nonlin(self((torch.flip(x, (3,)), torch.flip(context, (3,)))))
+                pred = self.inference_apply_nonlin(self(torch.flip(x, (3,))))
                 result_torch += 1 / num_results * torch.flip(pred, (3,))
 
                 if m == 2 and (0 in mirror_axes):
-                    pred = self.inference_apply_nonlin(self((torch.flip(x, (2,)), torch.flip(context, (2,)))))
+                    pred = self.inference_apply_nonlin(self(torch.flip(x, (2,))))
                 result_torch += 1 / num_results * torch.flip(pred, (2,))
 
                 if m == 3 and (0 in mirror_axes) and (1 in mirror_axes):
-                    pred = self.inference_apply_nonlin(self((torch.flip(x, (3, 2)), torch.flip(context, (3, 2)))))
+                    pred = self.inference_apply_nonlin(self(torch.flip(x, (3, 2))))
                 result_torch += 1 / num_results * torch.flip(pred, (3, 2))
 
                 if mult is not None:
@@ -152,23 +151,21 @@ class GenericUNetMultiScale(Generic_UNet):
     def _internal_predict_2D_2Dconv_tiled(self, x: np.ndarray, step_size: float, do_mirroring: bool, mirror_axes: tuple,
                                           patch_size: tuple, regions_class_order: tuple, use_gaussian: bool,
                                           pad_border_mode: str, pad_kwargs: dict, all_in_gpu: bool,
-                                          verbose: bool, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
+                                          verbose: bool) -> Tuple[np.ndarray, np.ndarray]:
         # better safe than sorry
-        assert len(x.shape) == 3, "x must be (c, x, y)"
+        assert len(x.shape) == 4, "x must be (modality, c, x, y)"
 
         if verbose: print("step_size:", step_size)
         if verbose: print("do mirror:", do_mirroring)
 
-        assert kwargs.get("trainer") is not None, \
-            "nnUNetTrainerV2MultiScale is required for sampling context"
-
-        trainer = kwargs['trainer']
-
         assert patch_size is not None, "patch_size cannot be None for tiled prediction"
+
+        context = x[1]
+        main = x[0]
 
         # for sliding window inference the image must at least be as large as the patch size. It does not matter
         # whether the shape is divisible by 2**num_pool as long as the patch size is
-        data, slicer = pad_nd_image(x, patch_size, pad_border_mode, pad_kwargs, True, None)
+        data, slicer = pad_nd_image(main, patch_size, pad_border_mode, pad_kwargs, True, None)
         data_shape = data.shape  # still c, x, y
 
         # compute the steps for sliding window
@@ -225,6 +222,7 @@ class GenericUNetMultiScale(Generic_UNet):
 
             if verbose: print("moving data to GPU")
             data = torch.from_numpy(data).cuda(self.get_device(), non_blocking=True)
+            context = torch.from_numpy(context).cuda(self.get_device(), non_blocking=True)
 
             if verbose: print("initializing result_numsamples (on GPU)")
             aggregated_nb_of_predictions = torch.zeros([self.num_classes] + list(data.shape[1:]), dtype=torch.half,
@@ -244,15 +242,12 @@ class GenericUNetMultiScale(Generic_UNet):
                 lb_y = y
                 ub_y = y + patch_size[1]
 
-                context = trainer.sample_context(
-                    properties=[{"offset_x": (ub_x - lb_x) // 2, "offset_y": (ub_y - lb_y) // 2}],
-                    keys=kwargs['key']
-                )
-                context = to_cuda(maybe_to_torch(context))
-
                 predicted_patch = self._internal_maybe_mirror_and_pred_2D(
-                    data[None, :, lb_x:ub_x, lb_y:ub_y], mirror_axes, do_mirroring,
-                    gaussian_importance_map, **{'context': context})[0]
+                    torch.stack([data[:, lb_x:ub_x, lb_y:ub_y], context[:, lb_x:ub_x, lb_y:ub_y]])[None],
+                    mirror_axes,
+                    do_mirroring,
+                    gaussian_importance_map
+                )[0]
 
                 if all_in_gpu:
                     predicted_patch = predicted_patch.half()
@@ -299,19 +294,18 @@ class GenericUNetMultiScale(Generic_UNet):
                                           regions_class_order: tuple = None, use_gaussian: bool = False,
                                           pad_border_mode: str = "edge", pad_kwargs: dict = None,
                                           all_in_gpu: bool = False,
-                                          verbose: bool = True, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
+                                          verbose: bool = True) -> Tuple[np.ndarray, np.ndarray]:
         if all_in_gpu:
             raise NotImplementedError
 
-        assert len(x.shape) == 4, "data must be c, x, y, z"
-
         predicted_segmentation = []
         softmax_pred = []
+        x = x[:, None]
 
         for s in range(x.shape[1]):
             pred_seg, softmax_pres = self._internal_predict_2D_2Dconv_tiled(
                 x[:, s], step_size, do_mirroring, mirror_axes, patch_size, regions_class_order, use_gaussian,
-                pad_border_mode, pad_kwargs, all_in_gpu, verbose, **kwargs)
+                pad_border_mode, pad_kwargs, all_in_gpu, verbose)
 
             predicted_segmentation.append(pred_seg[None])
             softmax_pred.append(softmax_pres[None])
@@ -327,7 +321,7 @@ class GenericUNetMultiScale(Generic_UNet):
                    regions_class_order: Tuple[int, ...] = None,
                    use_gaussian: bool = False, pad_border_mode: str = "constant",
                    pad_kwargs: dict = None, all_in_gpu: bool = False,
-                   verbose: bool = True, mixed_precision: bool = True, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
+                   verbose: bool = True, mixed_precision: bool = True) -> Tuple[np.ndarray, np.ndarray]:
         """
         Use this function to predict a 3D image. It does not matter whether the network is a 2D or 3D U-Net, it will
         detect that automatically and run the appropriate code.
@@ -383,7 +377,7 @@ class GenericUNetMultiScale(Generic_UNet):
         if self.training:
             print('WARNING! Network is in train mode during inference. This may be intended, or not...')
 
-        assert len(x.shape) == 4, "data must have shape (c,x,y,z)"
+        assert len(x.shape) == 4, "data must have shape (modality,c,x,y)"
 
         if mixed_precision:
             context = autocast
@@ -408,7 +402,7 @@ class GenericUNetMultiScale(Generic_UNet):
                         res = self._internal_predict_3D_2Dconv_tiled(x, patch_size, do_mirroring, mirror_axes,
                                                                      step_size,
                                                                      regions_class_order, use_gaussian, pad_border_mode,
-                                                                     pad_kwargs, all_in_gpu, False, **kwargs)
+                                                                     pad_kwargs, all_in_gpu, False)
                     else:
                         res = self._internal_predict_3D_2Dconv(x, patch_size, do_mirroring, mirror_axes,
                                                                regions_class_order,
