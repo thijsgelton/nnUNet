@@ -69,6 +69,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.deep_supervision_scales = None
         self.ds_loss_weights = None
         self.pin_memory = True
+        self.dl_val_full = None
 
     def initialize(self, training=True, force_load_plans=False):
         """
@@ -86,7 +87,10 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             if force_load_plans or (self.plans is None):
                 self.load_plans_file()
 
+            encoder_trainable = self.encoder_kwargs.pop("trainable", True)
             self.encoder = build_model(**self.encoder_kwargs)
+            if not encoder_trainable:
+                self.encoder.eval()
             self.process_plans(self.plans)
             self.setup_DA_params()
 
@@ -173,8 +177,22 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             training=False,
             crop_to_patch_size=False
         )
+        dl_val_full = DataLoader2DROIsMultiScale(
+            data_origin=self.data_origin,
+            spacing=self.spacing,
+            data=self.dataset_val,
+            final_patch_size=self.patch_size,
+            patch_size=self.patch_size,
+            batch_size=self.batch_size,
+            oversample_foreground_percent=self.oversample_foreground_percent,
+            pad_mode="constant",
+            pad_sides=self.pad_all_sides,
+            memmap_mode='r',
+            training=False,
+            crop_to_patch_size=False
+        )
 
-        return dl_tr, dl_val
+        return dl_tr, dl_val, dl_val_full
 
     def initialize_network(self):
         """
@@ -564,10 +582,11 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             import hiddenlayer as hl
             if torch.cuda.is_available():
                 g = hl.build_graph(self.network,
-                                   ([torch.rand((1, self.num_input_channels, *self.patch_size)).cuda()]) * 2,
+                                   torch.rand((1, 2, self.num_input_channels, *self.patch_size)).cuda(),
                                    transforms=None)
             else:
-                g = hl.build_graph(self.network, ([torch.rand((1, self.num_input_channels, *self.patch_size))]) * 2,
+                g = hl.build_graph(self.network,
+                                   torch.rand((1, 2, self.num_input_channels, *self.patch_size)).cuda(),
                                    transforms=None)
             g.save(join(self.output_folder, "network_architecture.pdf"))
             del g
