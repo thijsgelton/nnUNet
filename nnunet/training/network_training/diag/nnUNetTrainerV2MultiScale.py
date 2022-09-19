@@ -127,7 +127,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.was_initialized = True
 
     def prepare_data(self):
-        self.dl_tr, self.dl_val = self.get_basic_generators()
+        self.dl_tr, self.dl_val, self.dl_val_full = self.get_basic_generators()
         if self.unpack_data:
             print("unpacking dataset")
             unpack_dataset(self.folder_with_preprocessed_data)
@@ -139,6 +139,12 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         # Only color and simple spatial transforms. Otherwise misalignment of the context and target patches could happen
         self.tr_gen, self.val_gen = get_moreDA_augmentation_pathology_no_spatial(
             self.dl_tr, self.dl_val,
+            params=self.data_aug_params,
+            deep_supervision_scales=self.deep_supervision_scales,
+            pin_memory=self.pin_memory
+        )
+        _, self.val_gen_full_size = get_moreDA_augmentation_pathology_no_spatial(
+            self.dl_tr, self.dl_val_full,
             params=self.data_aug_params,
             deep_supervision_scales=self.deep_supervision_scales,
             pin_memory=self.pin_memory
@@ -174,8 +180,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
             memmap_mode='r',
-            training=False,
-            crop_to_patch_size=False
+            training=True,
+            crop_to_patch_size=True
         )
         dl_val_full = DataLoader2DROIsMultiScale(
             data_origin=self.data_origin,
@@ -293,7 +299,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         export_pool = Pool(default_num_threads)
         results = []
 
-        for data_dict in self.val_gen:
+        for data_dict in self.val_gen_full_size:
             properties = data_dict['properties']
             fname = properties['list_of_data_files'][0].split("/")[-1][:-12]
             if overwrite or (not isfile(join(output_folder, fname + ".nii.gz"))) or \
