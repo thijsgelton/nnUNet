@@ -95,21 +95,22 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             self.process_plans(self.plans)
             self.setup_DA_params()
 
-            ################# Here we wrap the loss for deep supervision ############
-            # we need to know the number of outputs of the network
-            net_numpool = len(self.net_num_pool_op_kernel_sizes)
+            if self.do_ds:
+                ################# Here we wrap the loss for deep supervision ############
+                # we need to know the number of outputs of the network
+                net_numpool = len(self.net_num_pool_op_kernel_sizes)
 
-            # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
-            # this gives higher resolution outputs more weight in the loss
-            weights = np.array([1 / (2 ** i) for i in range(net_numpool)])
+                # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
+                # this gives higher resolution outputs more weight in the loss
+                weights = np.array([1 / (2 ** i) for i in range(net_numpool)])
 
-            # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
-            mask = np.array([True] + [True if i < net_numpool - 1 else False for i in range(1, net_numpool)])
-            weights[~mask] = 0
-            weights = weights / weights.sum()
-            self.ds_loss_weights = weights
-            # now wrap the loss
-            self.loss = MultipleOutputLoss2(self.loss, self.ds_loss_weights)
+                # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
+                mask = np.array([True] + [True if i < net_numpool - 1 else False for i in range(1, net_numpool)])
+                weights[~mask] = 0
+                weights = weights / weights.sum()
+                self.ds_loss_weights = weights
+                # now wrap the loss
+                self.loss = MultipleOutputLoss2(self.loss, self.ds_loss_weights)
             ################# END ###################
 
             self.folder_with_preprocessed_data = join(self.dataset_directory, self.plans['data_identifier'] +
