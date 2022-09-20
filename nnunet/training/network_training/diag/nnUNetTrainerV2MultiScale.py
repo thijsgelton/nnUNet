@@ -51,7 +51,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
                  unpack_data=True, deterministic=True, fp16=False, data_origin=None, labels_dict=None, spacing=8.0,
-                 target_spacing=0.5, encoder_kwargs=None, convolutional_pooling=True):
+                 target_spacing=0.5, encoder_kwargs=None, convolutional_pooling=True, deepsupervision=True):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
         self.convolutional_pooling = convolutional_pooling
@@ -70,6 +70,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.ds_loss_weights = None
         self.pin_memory = True
         self.dl_val_full = None
+        self.do_ds = deepsupervision
 
     def initialize(self, training=True, force_load_plans=False):
         """
@@ -223,8 +224,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                                              self.base_num_features,
                                              self.num_classes, len(self.net_num_pool_op_kernel_sizes),
                                              self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
-                                             dropout_op_kwargs, net_nonlin, net_nonlin_kwargs, True, False, lambda x: x,
-                                             InitWeights_He(1e-2), self.net_num_pool_op_kernel_sizes,
+                                             dropout_op_kwargs, net_nonlin, net_nonlin_kwargs, self.do_ds, False,
+                                             lambda x: x, InitWeights_He(1e-2), self.net_num_pool_op_kernel_sizes,
                                              self.net_conv_kernel_sizes, False, self.convolutional_pooling,
                                              self.convolutional_pooling)
         if torch.cuda.is_available():
