@@ -38,6 +38,7 @@ from nnunet.training.dataloading.dataset_loading import unpack_dataset
 from nnunet.training.dataloading.diag.dataset_loading_insideroi_multiscale import DataLoader2DROIsMultiScale
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
+from nnunet.training.network_training.nnUNetTrainer import nnUNetTrainer
 from nnunet.training.network_training.nnUNetTrainerV2 import nnUNetTrainerV2
 from nnunet.utilities import shutil_sol
 from nnunet.utilities.nd_softmax import softmax_helper
@@ -496,6 +497,19 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
         return l.detach().cpu().numpy()
 
+    def run_online_evaluation(self, output, target):
+        """
+        due to deep supervision the return value and the reference are now lists of tensors. We only need the full
+        resolution output because this is what we are interested in in the end. The others are ignored
+        :param output:
+        :param target:
+        :return:
+        """
+        if self.do_ds:
+            target = target[0]
+            output = output[0]
+        return nnUNetTrainer.run_online_evaluation(self, output, target)
+
     def setup_DA_params(self):
         """
         - we increase roation angle from [-15, 15] to [-30, 30]
@@ -504,9 +518,9 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
         :return:
         """
-
-        self.deep_supervision_scales = [[1, 1, 1]] + list(list(i) for i in 1 / np.cumprod(
-            np.vstack(self.net_num_pool_op_kernel_sizes), axis=0))[:-1]
+        if self.do_ds:
+            self.deep_supervision_scales = [[1, 1, 1]] + list(list(i) for i in 1 / np.cumprod(
+                np.vstack(self.net_num_pool_op_kernel_sizes), axis=0))[:-1]
         self.data_aug_params = default_2D_augmentation_params
         self.data_aug_params["mask_was_used_for_normalization"] = self.use_mask_for_norm
         self.data_aug_params["do_scaling"] = False
