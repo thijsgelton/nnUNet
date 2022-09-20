@@ -24,14 +24,16 @@ import numpy as np
 
 class ExperimentPlanner2D_v21_MultiScale(ExperimentPlanner2D):
     def __init__(self, folder_with_cropped_data, preprocessed_output_folder, vram_encoder=154257408,
-                 force_patch_size=None, force_num_pools=None):
+                 force_patch_size=None, force_num_pools=None,
+                 data_identifier="nnUNetData_plans_v2.1_MultiScale_plans_2D",
+                 plans_fname="nnUNetPlansv2.1_MultiScale_plans_2D.pkl"):
         super(ExperimentPlanner2D_v21_MultiScale, self).__init__(folder_with_cropped_data, preprocessed_output_folder)
         self.force_patch_size = force_patch_size
         self.force_num_pools = force_num_pools
         self.vram_encoder = vram_encoder
-        self.data_identifier = "nnUNetData_plans_v2.1_MultiScale_plans_2D"
+        self.data_identifier = data_identifier
         self.plans_fname = join(self.preprocessed_output_folder,
-                                "nnUNetPlansv2.1_MultiScale_plans_2D.pkl")
+                                plans_fname)
         self.unet_base_num_features = 32
 
     def get_properties_for_stage(self, current_spacing, original_spacing, original_shape, num_cases,

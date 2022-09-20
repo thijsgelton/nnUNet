@@ -42,14 +42,14 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
     """
 
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
-                 unpack_data=True, deterministic=True, fp16=False):
+                 unpack_data=True, deterministic=True, fp16=False, **kwargs):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
         self.max_num_epochs = 1000
         self.initial_lr = 1e-2
         self.deep_supervision_scales = None
         self.ds_loss_weights = None
-
+        self.data_identifier = kwargs.pop("data_identifier")
         self.pin_memory = True
 
     def initialize(self, training=True, force_load_plans=False):
@@ -89,7 +89,8 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
             self.loss = MultipleOutputLoss2(self.loss, self.ds_loss_weights)
             ################# END ###################
 
-            self.folder_with_preprocessed_data = join(self.dataset_directory, self.plans['data_identifier'] +
+            self.folder_with_preprocessed_data = join(self.dataset_directory,
+                                                      (self.data_identifier or self.plans['data_identifier']) +
                                                       "_stage%d" % self.stage)
             if training:
                 self.dl_tr, self.dl_val = self.get_basic_generators()
@@ -202,7 +203,8 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
                                                          use_sliding_window: bool = True, step_size: float = 0.5,
                                                          use_gaussian: bool = True, pad_border_mode: str = 'constant',
                                                          pad_kwargs: dict = None, all_in_gpu: bool = False,
-                                                         verbose: bool = True, mixed_precision=True) -> Tuple[np.ndarray, np.ndarray]:
+                                                         verbose: bool = True, mixed_precision=True) -> Tuple[
+        np.ndarray, np.ndarray]:
         """
         We need to wrap this because we need to enforce self.network.do_ds = False for prediction
         """
@@ -434,6 +436,9 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
         we also need to make sure deep supervision in the network is enabled for training, thus the wrapper
         :return:
         """
+        config = self.get_debug_information()
+        wandb.init(project=os.environ.get("WANDB_PROJECT"), config=config)
+
         self.maybe_update_lr(self.epoch)  # if we dont overwrite epoch then self.epoch+1 is used which is not what we
         # want at the start of the training
         ds = self.network.do_ds
@@ -441,3 +446,18 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
         ret = super().run_training()
         self.network.do_ds = ds
         return ret
+
+    def on_epoch_end(self):
+        continue_training = super().on_epoch_end()
+        self.log_to_wandb()
+        return continue_training
+
+    def log_to_wandb(self):
+        wandb.log({
+            "train/loss": self.all_tr_losses[-1],
+            "val/loss": self.all_val_losses[-1],
+            **{f'val/metric_{cls_index}': score for cls_index, score in
+               self.all_val_eval_metrics_per_class[-1].items() if not np.isnan(score)},
+            "val/metric": self.all_val_eval_metrics[-1],
+            "learning_rate": self.optimizer.param_groups[0]['lr']
+        })
