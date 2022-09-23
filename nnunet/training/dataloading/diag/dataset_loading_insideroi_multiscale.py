@@ -11,7 +11,8 @@ from nnunet.training.dataloading.dataset_loading import DataLoader2D
 
 
 class DataLoader2DROIsMultiScale(DataLoader2D):
-    def __init__(self, data_origin, spacing, crop_to_patch_size=True, training=True, *args, **kwargs):
+    def __init__(self, data_origin, spacing, crop_to_patch_size=True, training=True, key_to_class=None, *args,
+                 **kwargs):
         """
         This is the basic data loader for 2D networks. It uses preprocessed data as produced by my (Fabian) preprocessing.
         You can load the data with load_dataset(folder) where folder is the folder where the npz files are located. If there
@@ -40,6 +41,7 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
         self.crop_to_patch_size = crop_to_patch_size
         self.data_origin = data_origin
         self.spacing = spacing
+        self.key_to_class = key_to_class
         super(DataLoader2DROIsMultiScale, self).__init__(*args, **kwargs)
 
     def __next__(self):
@@ -127,7 +129,8 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
                                                                 (-min(0, bbox_x_lb), max(bbox_x_ub - shape[0], 0)),
                                                                 (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0))),
                                            'constant', **{'constant_values': -1})
-
+            if self.key_to_class:
+                case_properties[j]['context_class'] = self.key_to_class[selected_keys[j]]
             data[j] = np.stack([case_all_data_donly,
                                 self.sample_context(case_properties[j], selected_keys[j],
                                                     case_all_data_donly.shape[-2:])])
@@ -145,6 +148,9 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
             properties = self._data[selected_key]['properties']
         else:
             properties = load_pickle(self._data[selected_key]['properties_file'])
+
+        if self.key_to_class:
+            properties['context_class'] = self.key_to_class[selected_key]
 
         if not isfile(self._data[selected_key]['data_file'][:-4] + ".npy"):
             case_all_data = np.load(self._data[selected_key]['data_file'][:-4] + ".npz")['data'][:, None][:, 0]

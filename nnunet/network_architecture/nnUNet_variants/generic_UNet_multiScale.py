@@ -62,6 +62,14 @@ class GenericUNetMultiScale(Generic_UNet):
                                                 self.norm_op_kwargs, self.dropout_op,
                                                 self.dropout_op_kwargs, self.nonlin, self.nonlin_kwargs,
                                                 basic_block=ConvDropoutNormNonlin)
+        reduce_spatial_conv_kwargs = self.conv_kwargs.copy()
+        reduce_spatial_conv_kwargs['kernal_size'] = (w_e, h_e)
+        reduce_spatial_conv_kwargs['padding'] = [0, 0]
+        self.context_logits_conv = StackedConvLayers(c_e, c_e * 2, 2, reduce_spatial_conv_kwargs,
+                                                     self.norm_op, self.norm_op_kwargs, self.dropout_op,
+                                                     self.dropout_op_kwargs, self.nonlin, self.nonlin_kwargs,
+                                                     basic_block=ConvDropoutNormNonlin)
+        self.context_logits_fc = nn.Linear(c_e * 2, self.context_num_classes)
         del b_t, c_t, b_e, c_e, w_e, h_e
 
     def forward(self, x):
@@ -76,7 +84,7 @@ class GenericUNetMultiScale(Generic_UNet):
                 main = self.td[d](main)
 
         main_encoding = self.conv_blocks_context[-1](main)
-        context_encoding = self.context_encoder(context)
+        context_encoding = self.context_encoder(context)  # 512, 16x16
 
         w, h = main_encoding.shape[-2:]
 
@@ -90,6 +98,9 @@ class GenericUNetMultiScale(Generic_UNet):
 
         x = self.reduce_fm_conv(x)
 
+        context_encoding = self.context_logits_conv(context_encoding)
+        context_logits = self.context_logits_fc(torch.squeeze(context_encoding))
+
         for u in range(len(self.tu)):
             x = self.tu[u](x)
             x = torch.cat((x, skips[-(u + 1)]), dim=1)
@@ -98,9 +109,10 @@ class GenericUNetMultiScale(Generic_UNet):
 
         if self._deep_supervision and self.do_ds:
             return tuple([seg_outputs[-1]] + [i(j) for i, j in
-                                              zip(list(self.upscale_logits_ops)[::-1], seg_outputs[:-1][::-1])])
+                                              zip(list(self.upscale_logits_ops)[::-1],
+                                                  seg_outputs[:-1][::-1])]), context_logits
         else:
-            return seg_outputs[-1]
+            return seg_outputs[-1], context_logits
 
     def _internal_maybe_mirror_and_pred_2D(self, x: Union[np.ndarray, torch.tensor], mirror_axes: tuple,
                                            do_mirroring: bool = True,
@@ -128,19 +140,19 @@ class GenericUNetMultiScale(Generic_UNet):
 
         for m in range(mirror_idx):
             if m == 0:
-                pred = self.inference_apply_nonlin(self(x))
+                pred = self.inference_apply_nonlin(self(x)[0])
                 result_torch += 1 / num_results * pred
 
             if m == 1 and (1 in mirror_axes):
-                pred = self.inference_apply_nonlin(self(torch.flip(x, (4,))))
+                pred = self.inference_apply_nonlin(self(torch.flip(x, (4,)))[0])
                 result_torch += 1 / num_results * torch.flip(pred, (3,))
 
                 if m == 2 and (0 in mirror_axes):
-                    pred = self.inference_apply_nonlin(self(torch.flip(x, (3,))))
+                    pred = self.inference_apply_nonlin(self(torch.flip(x, (3,)))[0])
                 result_torch += 1 / num_results * torch.flip(pred, (2,))
 
                 if m == 3 and (0 in mirror_axes) and (1 in mirror_axes):
-                    pred = self.inference_apply_nonlin(self(torch.flip(x, (4, 3))))
+                    pred = self.inference_apply_nonlin(self(torch.flip(x, (4, 3)))[0])
                 result_torch += 1 / num_results * torch.flip(pred, (3, 2))
 
                 if mult is not None:

@@ -23,6 +23,7 @@ from mtdp import build_model
 from scipy.stats import zscore
 from torch import nn
 from torch.cuda.amp import autocast
+from torch.nn import BCELoss
 
 from nnunet.configuration import default_num_threads
 from nnunet.evaluation.evaluator import aggregate_scores
@@ -38,6 +39,7 @@ from nnunet.training.dataloading.dataset_loading import unpack_dataset
 from nnunet.training.dataloading.diag.dataset_loading_insideroi_multiscale import DataLoader2DROIsMultiScale
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
+from nnunet.training.loss_functions.dice_loss import DC_and_CE_loss
 from nnunet.training.network_training.nnUNetTrainer import nnUNetTrainer
 from nnunet.training.network_training.nnUNetTrainerV2 import nnUNetTrainerV2
 from nnunet.utilities import shutil_sol
@@ -52,9 +54,12 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
                  unpack_data=True, deterministic=True, fp16=False, data_origin=None, labels_dict=None, spacing=8.0,
-                 target_spacing=0.5, encoder_kwargs=None, convolutional_pooling=True, deepsupervision=True):
+                 target_spacing=0.5, encoder_kwargs=None, convolutional_pooling=True, deepsupervision=True,
+                 use_context_loss=False, mapping_key_to_class_json_file=None):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
+        self.mapping_key_to_class_json_file = mapping_key_to_class_json_file
+        self.use_context_loss = use_context_loss
         self.convolutional_pooling = convolutional_pooling
         self.spacing = spacing
         self.target_spacing = target_spacing
@@ -67,11 +72,15 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.encoder_kwargs = encoder_kwargs
         self.max_num_epochs = 1000
         self.initial_lr = 1e-2
-        self.deep_supervision_scales = None
-        self.ds_loss_weights = None
+        self.encoder = None
+        self.ds_loss_weights, self.deep_supervision_scales = None, None
+        self.key_to_class = None
         self.pin_memory = True
         self.dl_val_full = None
         self.do_ds = deepsupervision
+        self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': False}, {})
+        if self.use_context_loss:
+            self.context_loss = nn.BCEWithLogitsLoss()
 
     def initialize(self, training=True, force_load_plans=False):
         """
@@ -96,23 +105,12 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             self.process_plans(self.plans)
             self.setup_DA_params()
 
+            if self.use_context_loss:
+                with open(self.mapping_key_to_class_json_file, "r") as jason:
+                    self.key_to_class = json.load(jason)
+
             if self.do_ds:
-                ################# Here we wrap the loss for deep supervision ############
-                # we need to know the number of outputs of the network
-                net_numpool = len(self.net_num_pool_op_kernel_sizes)
-
-                # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
-                # this gives higher resolution outputs more weight in the loss
-                weights = np.array([1 / (2 ** i) for i in range(net_numpool)])
-
-                # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
-                mask = np.array([True] + [True if i < net_numpool - 1 else False for i in range(1, net_numpool)])
-                weights[~mask] = 0
-                weights = weights / weights.sum()
-                self.ds_loss_weights = weights
-                # now wrap the loss
-                self.loss = MultipleOutputLoss2(self.loss, self.ds_loss_weights)
-            ################# END ###################
+                self.wrap_loss_for_deep_supervision()
 
             self.folder_with_preprocessed_data = join(self.dataset_directory, self.plans['data_identifier'] +
                                                       "_stage%d" % self.stage)
@@ -128,6 +126,20 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         else:
             self.print_to_log_file('self.was_initialized is True, not running self.initialize again')
         self.was_initialized = True
+
+    def wrap_loss_for_deep_supervision(self):
+        net_num_pool = len(self.net_num_pool_op_kernel_sizes)
+        self.ds_loss_weights = self.compute_decreasing_weights(net_num_pool)
+        self.loss = MultipleOutputLoss2(self.loss, self.ds_loss_weights)
+
+    @staticmethod
+    def compute_decreasing_weights(net_num_pool):
+        weights = np.array([1 / (2 ** i) for i in range(net_num_pool)])
+        # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
+        mask = np.array([True] + [True if i < net_num_pool - 1 else False for i in range(1, net_num_pool)])
+        weights[~mask] = 0
+        weights = weights / weights.sum()
+        return weights
 
     def prepare_data(self):
         self.dl_tr, self.dl_val, self.dl_val_full = self.get_basic_generators()
@@ -198,6 +210,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_sides=self.pad_all_sides,
             memmap_mode='r',
             training=False,
+
             crop_to_patch_size=False
         )
 
@@ -457,6 +470,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         """
         data_dict = next(data_generator)
         data = data_dict['data']
+        context_target = data_dict['properties'].get("context_class")
         target = data_dict['target']
 
         data = maybe_to_torch(data)
@@ -470,23 +484,19 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
         if self.fp16:
             with autocast():
-                output = self.network(data)
-                del data
-                l = self.loss(output, target)
+                loss, output = self.apply_network(context_target, data, target)
 
             if do_backprop:
-                self.amp_grad_scaler.scale(l).backward()
+                self.amp_grad_scaler.scale(loss).backward()
                 self.amp_grad_scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.network.parameters(), 12)
                 self.amp_grad_scaler.step(self.optimizer)
                 self.amp_grad_scaler.update()
         else:
-            output = self.network(data)
-            del data
-            l = self.loss(output, target)
+            loss, output = self.apply_network(context_target, data, target)
 
             if do_backprop:
-                l.backward()
+                loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.network.parameters(), 12)
                 self.optimizer.step()
 
@@ -495,12 +505,20 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
         del target
 
-        return l.detach().cpu().numpy()
+        return loss.detach().cpu().numpy()
+
+    def apply_network(self, context_target, data, target):
+        output, context_logits = self.network(data)
+        del data
+        loss = self.loss(output, target)
+        if self.use_context_loss:
+            loss += self.context_loss(context_logits, context_target).item()
+        return loss, output
 
     def run_online_evaluation(self, output, target):
         """
         due to deep supervision the return value and the reference are now lists of tensors. We only need the full
-        resolution output because this is what we are interested in in the end. The others are ignored
+        resolution output because this is what we are interested in the end. The others are ignored
         :param output:
         :param target:
         :return:
@@ -512,11 +530,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
     def setup_DA_params(self):
         """
-        - we increase roation angle from [-15, 15] to [-30, 30]
-        - scale range is now (0.7, 1.4), was (0.85, 1.25)
-        - we don't do elastic deformation anymore
-
-        :return:
+        Specific to multiscale. No spatial translations that can misalign the target and context patches. So, flips
+        are allowed and colour transformations.
         """
         if self.do_ds:
             self.deep_supervision_scales = [[1, 1, 1]] + list(list(i) for i in 1 / np.cumprod(
@@ -532,7 +547,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.basic_generator_patch_size = self.patch_size
         self.data_aug_params["do_hed"] = True
         self.data_aug_params["hed_params"] = dict(factor=0.05)
-        self.data_aug_params["do_hsv"] = False
+        self.data_aug_params["do_hsv"] = False  # HSV can cause artifacts.
         self.data_aug_params["hsv_params"] = dict(h_lim=0.01, s_lim=0.01, v_lim=0.05)
         self.data_aug_params['selected_seg_channels'] = [0]
         self.data_aug_params['patch_size_for_spatialtransform'] = self.patch_size
@@ -554,26 +569,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             ep = epoch
         self.optimizer.param_groups[0]['lr'] = poly_lr(ep, self.max_num_epochs, self.initial_lr, 0.9)
         self.print_to_log_file("lr:", np.round(self.optimizer.param_groups[0]['lr'], decimals=6))
-
-    def on_epoch_end(self):
-        """
-        overwrite patient-based early stopping. Always run to 1000 epochs
-        :return:
-        """
-        super().on_epoch_end()
-        continue_training = self.epoch < self.max_num_epochs
-
-        # it can rarely happen that the momentum of nnUNetTrainerV2 is too high for some dataset. If at epoch 100 the
-        # estimated validation Dice is still 0 then we reduce the momentum from 0.99 to 0.95
-        if self.epoch == 100:
-            if self.all_val_eval_metrics[-1] == 0:
-                self.optimizer.param_groups[0]["momentum"] = 0.95
-                self.network.apply(InitWeights_He(1e-2))
-                self.print_to_log_file("At epoch 100, the mean foreground Dice was 0. This can be caused by a too "
-                                       "high momentum. High momentum (0.99) is good for datasets where it works, but "
-                                       "sometimes causes issues such as this one. Momentum has now been reduced to "
-                                       "0.95 and network weights have been reinitialized")
-        return continue_training
 
     def run_training(self):
         """
@@ -624,6 +619,11 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                 torch.cuda.empty_cache()
 
     def on_epoch_end(self):
+
+        """
+        overwrite patient-based early stopping. Always run to 1000 epochs
+        :return:
+        """
         continue_training = super().on_epoch_end()
         self.log_to_wandb()
         return continue_training
