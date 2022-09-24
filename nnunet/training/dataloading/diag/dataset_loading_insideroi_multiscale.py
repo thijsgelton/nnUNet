@@ -114,9 +114,8 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
             offset_x = (valid_bbox_x_lb + (valid_bbox_x_ub - valid_bbox_x_lb) // 2) - width // 2
             offset_y = (valid_bbox_y_lb + (valid_bbox_y_ub - valid_bbox_y_lb) // 2) - height // 2
 
-            case_properties[j]['offset_x'] = int(
-                offset_y)  # This is correct, not sure why x and y need to be swapped
-            case_properties[j]['offset_y'] = int(offset_x)
+            case_properties[j]['offset_x'] = int(offset_x)
+            case_properties[j]['offset_y'] = int(offset_y)
 
             case_all_data = case_all_data[:, valid_bbox_x_lb:valid_bbox_x_ub, valid_bbox_y_lb:valid_bbox_y_ub]
 
@@ -173,7 +172,7 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
         wsa = WholeSlideAnnotation(glob(f"{file_identifier}.xml")[0], parser=parser)
         wsi = WholeSlideImage(glob(f"{file_identifier}.tif")[0], backend='asap')
         anno = wsa.sampling_annotations[anno_number]
-        x, y = anno.center
+        y, x = anno.center
         x += props.get("offset_x", 0)
         y += props.get("offset_y", 0)
         return wsi.get_patch(x, y, *shape[::-1], spacing=self.spacing).transpose(2, 0, 1) / 255.

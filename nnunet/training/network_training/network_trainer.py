@@ -364,7 +364,7 @@ class NetworkTrainer(object):
                 if 'amp_grad_scaler' in checkpoint.keys():
                     self.amp_grad_scaler.load_state_dict(checkpoint['amp_grad_scaler'])
 
-        self.network.load_state_dict(new_state_dict)
+        self.network.load_state_dict(new_state_dict, strict=False)
         self.epoch = checkpoint['epoch']
         if train:
             optimizer_state_dict = checkpoint['optimizer_state_dict']

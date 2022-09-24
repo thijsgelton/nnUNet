@@ -23,17 +23,17 @@ from mtdp import build_model
 from scipy.stats import zscore
 from torch import nn
 from torch.cuda.amp import autocast
-from torch.nn import BCELoss
 
 from nnunet.configuration import default_num_threads
 from nnunet.evaluation.evaluator import aggregate_scores
-from nnunet.inference.segmentation_export import save_segmentation_nifti_from_softmax
+from nnunet.inference.segmentation_export import save_segmentation_nifti_from_softmax, save_segmentation_plot
 from nnunet.network_architecture.initialization import InitWeights_He
 from nnunet.network_architecture.neural_network import SegmentationNetwork
 from nnunet.network_architecture.nnUNet_variants.generic_UNet_multiScale import GenericUNetMultiScale
 from nnunet.postprocessing.connected_components import determine_postprocessing
 from nnunet.training.data_augmentation.data_augmentation_moreDA_pathology_no_spatial import \
     get_moreDA_augmentation_pathology_no_spatial
+from nnunet.training.data_augmentation.data_augmentation_noDA import get_no_augmentation
 from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params
 from nnunet.training.dataloading.dataset_loading import unpack_dataset
 from nnunet.training.dataloading.diag.dataset_loading_insideroi_multiscale import DataLoader2DROIsMultiScale
@@ -55,11 +55,14 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
                  unpack_data=True, deterministic=True, fp16=False, data_origin=None, labels_dict=None, spacing=8.0,
                  target_spacing=0.5, encoder_kwargs=None, convolutional_pooling=True, deepsupervision=True,
-                 use_context_loss=False, mapping_key_to_class_json_file=None):
+                 mapping_key_to_class_json_file=None, context_num_classes=None, use_context=True, max_num_epochs=1000,
+                 plot_validation_results=False):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
+        self.plot_validation_results = plot_validation_results
+        self.context_num_classes = context_num_classes
         self.mapping_key_to_class_json_file = mapping_key_to_class_json_file
-        self.use_context_loss = use_context_loss
+        self.use_context_loss = context_num_classes is not None
         self.convolutional_pooling = convolutional_pooling
         self.spacing = spacing
         self.target_spacing = target_spacing
@@ -70,14 +73,16 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             print("Since encoder_kwargs is empty, we will use the default: resnet18 with imagenet weights.")
             encoder_kwargs = {"arch": "resnet18", "pretrained": "imagenet"}
         self.encoder_kwargs = encoder_kwargs
-        self.max_num_epochs = 1000
+        self.max_num_epochs = max_num_epochs
         self.initial_lr = 1e-2
+        self.initial_lr_context = 1e-5
         self.encoder = None
         self.ds_loss_weights, self.deep_supervision_scales = None, None
         self.key_to_class = None
         self.pin_memory = True
         self.dl_val_full = None
         self.do_ds = deepsupervision
+        self.use_context = use_context
         self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': False}, {})
         if self.use_context_loss:
             self.context_loss = nn.BCEWithLogitsLoss()
@@ -94,6 +99,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         """
         if not self.was_initialized:
             maybe_mkdir_p(self.output_folder)
+            maybe_mkdir_p(join(self.output_folder, "debug_plots"))
 
             if force_load_plans or (self.plans is None):
                 self.load_plans_file()
@@ -107,7 +113,10 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
             if self.use_context_loss:
                 with open(self.mapping_key_to_class_json_file, "r") as jason:
-                    self.key_to_class = json.load(jason)
+                    self.key_to_class = {
+                        k: (torch.tensor([0, 1], dtype=torch.float32) if v > 3 else torch.tensor([1, 0],
+                                                                                                 dtype=torch.float32))
+                        for k, v in json.load(jason).items()}
 
             if self.do_ds:
                 self.wrap_loss_for_deep_supervision()
@@ -182,6 +191,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             oversample_foreground_percent=self.oversample_foreground_percent,
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
+            key_to_class=self.key_to_class,
             memmap_mode='r'
         )
         dl_val = DataLoader2DROIsMultiScale(
@@ -196,6 +206,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_sides=self.pad_all_sides,
             memmap_mode='r',
             training=True,
+            key_to_class=self.key_to_class,
             crop_to_patch_size=True
         )
         dl_val_full = DataLoader2DROIsMultiScale(
@@ -210,7 +221,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_sides=self.pad_all_sides,
             memmap_mode='r',
             training=False,
-
             crop_to_patch_size=False
         )
 
@@ -235,7 +245,9 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         dropout_op_kwargs = {'p': 0, 'inplace': True}
         net_nonlin = nn.LeakyReLU
         net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
-        self.network = GenericUNetMultiScale(self.encoder, self.spacing, self.target_spacing, self.num_input_channels,
+        self.network = GenericUNetMultiScale(self.encoder, self.spacing, self.target_spacing, self.context_num_classes,
+                                             self.use_context,
+                                             self.num_input_channels,
                                              self.base_num_features,
                                              self.num_classes, len(self.net_num_pool_op_kernel_sizes),
                                              self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
@@ -249,8 +261,11 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
     def initialize_optimizer_and_scheduler(self):
         assert self.network is not None, "self.initialize_network must be called first"
-        self.optimizer = torch.optim.SGD(self.network.parameters(), self.initial_lr, weight_decay=self.weight_decay,
-                                         momentum=0.99, nesterov=True)
+        self.optimizer = torch.optim.SGD(
+            [{'params': [param for (name, param) in self.network.named_parameters() if 'context_encoder' not in name]},
+             {'params': self.network.context_encoder.parameters(), 'lr': self.initial_lr_context}],
+            self.initial_lr, weight_decay=self.weight_decay,
+            momentum=0.95, nesterov=True)
         self.lr_scheduler = None
 
     def validate(self, do_mirroring: bool = True, use_sliding_window: bool = True, step_size: float = 0.5,
@@ -350,6 +365,11 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                 if np.prod(softmax_pred.shape) > (2e9 / 4 * 0.85):  # *0.85 just to be save
                     np.save(join(output_folder, fname + ".npy"), softmax_pred)
                     softmax_pred = join(output_folder, fname + ".npy")
+
+                export_pool.starmap_async(save_segmentation_plot,
+                                          ((pred[0], data_dict['target'][0][0][0],
+                                            data[0].cpu().numpy().transpose(1, 2, 0),
+                                            join(output_folder, fname + ".png")),))
 
                 results.append(export_pool.starmap_async(save_segmentation_nifti_from_softmax,
                                                          ((softmax_pred, join(output_folder, fname + ".nii.gz"),
@@ -470,15 +490,20 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         """
         data_dict = next(data_generator)
         data = data_dict['data']
-        context_target = data_dict['properties'].get("context_class")
         target = data_dict['target']
 
         data = maybe_to_torch(data)
         target = maybe_to_torch(target)
+        context_target = None
+        if self.use_context_loss:
+            context_target = torch.stack([d['context_class'] for d in data_dict['properties']])
+            context_target = maybe_to_torch(context_target)
 
         if torch.cuda.is_available():
             data = to_cuda(data)
             target = to_cuda(target)
+            if self.use_context_loss:
+                context_target = to_cuda(context_target)
 
         self.optimizer.zero_grad()
 
@@ -503,16 +528,30 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         if run_online_evaluation:
             self.run_online_evaluation(output, target)
 
-        del target
-
+        if not self.network.training and self.plot_validation_results:
+            save_segmentation_plot(
+                torch.argmax(output[0][0], dim=0).cpu().numpy(),
+                target[0][0][0].cpu().numpy(),
+                data[0, 0].cpu().numpy().transpose(1, 2, 0),
+                file_path=join(self.output_folder, "debug_plots", data_dict['keys'][0] + ".png")
+            )
+            save_segmentation_plot(
+                torch.argmax(output[0][1], dim=0).cpu().numpy(),
+                target[0][1][0].cpu().numpy(),
+                data[1, 0].cpu().numpy().transpose(1, 2, 0),
+                file_path=join(self.output_folder, "debug_plots", data_dict['keys'][1] + ".png")
+            )
+        del target, data
         return loss.detach().cpu().numpy()
 
     def apply_network(self, context_target, data, target):
         output, context_logits = self.network(data)
-        del data
         loss = self.loss(output, target)
+        wandb.log({"train/target_loss": loss})
         if self.use_context_loss:
-            loss += self.context_loss(context_logits, context_target).item()
+            context_loss = self.context_loss(context_logits, context_target).item()
+            wandb.log({"train/context_loss": context_loss})
+            loss += context_loss
         return loss, output
 
     def run_online_evaluation(self, output, target):
@@ -546,7 +585,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.data_aug_params["do_mirror"] = True
         self.basic_generator_patch_size = self.patch_size
         self.data_aug_params["do_hed"] = True
-        self.data_aug_params["hed_params"] = dict(factor=0.05)
+        self.data_aug_params["hed_params"] = dict(factor=0.05, p_per_sample=0.5)
         self.data_aug_params["do_hsv"] = False  # HSV can cause artifacts.
         self.data_aug_params["hsv_params"] = dict(h_lim=0.01, s_lim=0.01, v_lim=0.05)
         self.data_aug_params['selected_seg_channels'] = [0]
@@ -568,6 +607,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         else:
             ep = epoch
         self.optimizer.param_groups[0]['lr'] = poly_lr(ep, self.max_num_epochs, self.initial_lr, 0.9)
+        self.optimizer.param_groups[1]['lr'] = poly_lr(ep, self.max_num_epochs, self.initial_lr_context, 0.9)
         self.print_to_log_file("lr:", np.round(self.optimizer.param_groups[0]['lr'], decimals=6))
 
     def run_training(self):
@@ -635,5 +675,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             **{f'val/metric_{cls_index}': score for cls_index, score in
                self.all_val_eval_metrics_per_class[-1].items() if not np.isnan(score)},
             "val/metric": self.all_val_eval_metrics[-1],
-            "learning_rate": self.optimizer.param_groups[0]['lr']
+            "learning_rate": self.optimizer.param_groups[0]['lr'],
+            "learning_rate_context": self.optimizer.param_groups[1]['lr'],
         })

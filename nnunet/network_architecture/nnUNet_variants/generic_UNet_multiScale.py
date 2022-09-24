@@ -35,7 +35,8 @@ class GenericUNetMultiScale(Generic_UNet):
 
     use_this_for_batch_size_computation_2D = 19739648
 
-    def __init__(self, context_encoder: torch.nn.Module, ct_spacing, tg_spacing, *args, **kwargs):
+    def __init__(self, context_encoder: torch.nn.Module, ct_spacing, tg_spacing, context_num_classes, use_context,
+                 *args, **kwargs):
         """
         First version that uses a CNN to encode context around the main patch. Assuming that the following formula holds:
         Encoder contains 5 downsamplings and the input patch is at 8.0 mpp. This results in 2**3 * 2**5 = 2**8 mpp patch
@@ -44,7 +45,9 @@ class GenericUNetMultiScale(Generic_UNet):
          cropped by 2**2 = 2**(8-6).
         """
         super(GenericUNetMultiScale, self).__init__(*args, **kwargs)
+        self.context_num_classes = context_num_classes
         self.context_encoder = context_encoder
+        self.use_context = use_context
         reduce_conv_kwargs = self.conv_kwargs.copy()
         reduce_conv_kwargs['kernel_size'] = [1, 1]
         reduce_conv_kwargs['padding'] = [0, 0]
@@ -63,13 +66,16 @@ class GenericUNetMultiScale(Generic_UNet):
                                                 self.dropout_op_kwargs, self.nonlin, self.nonlin_kwargs,
                                                 basic_block=ConvDropoutNormNonlin)
         reduce_spatial_conv_kwargs = self.conv_kwargs.copy()
-        reduce_spatial_conv_kwargs['kernal_size'] = (w_e, h_e)
+        reduce_spatial_conv_kwargs['kernel_size'] = (w_e - 1, h_e - 1)
         reduce_spatial_conv_kwargs['padding'] = [0, 0]
-        self.context_logits_conv = StackedConvLayers(c_e, c_e * 2, 2, reduce_spatial_conv_kwargs,
-                                                     self.norm_op, self.norm_op_kwargs, self.dropout_op,
-                                                     self.dropout_op_kwargs, self.nonlin, self.nonlin_kwargs,
-                                                     basic_block=ConvDropoutNormNonlin)
-        self.context_logits_fc = nn.Linear(c_e * 2, self.context_num_classes)
+        if self.context_num_classes:
+            self.context_logits_conv = StackedConvLayers(c_e, c_e // 2, 1, self.conv_op, reduce_spatial_conv_kwargs,
+                                                         self.norm_op, self.norm_op_kwargs, self.dropout_op,
+                                                         self.dropout_op_kwargs, self.nonlin, self.nonlin_kwargs,
+                                                         basic_block=ConvDropoutNormNonlin)
+            self.context_logits_fc = nn.Sequential(
+                *[nn.Linear(c_e * 2, self.context_num_classes), nn.Dropout(p=0.25)]
+            )
         del b_t, c_t, b_e, c_e, w_e, h_e
 
     def forward(self, x):
@@ -84,22 +90,28 @@ class GenericUNetMultiScale(Generic_UNet):
                 main = self.td[d](main)
 
         main_encoding = self.conv_blocks_context[-1](main)
-        context_encoding = self.context_encoder(context)  # 512, 16x16
+        if self.use_context:
+            context_encoding = self.context_encoder(context)  # 512, 16x16
 
-        w, h = main_encoding.shape[-2:]
+            w, h = main_encoding.shape[-2:]
 
-        cropped = center_crop(context_encoding, output_size=[
-            int(w * 2 ** -self.ds_difference),
-            int(h * 2 ** -self.ds_difference)
-        ])
+            cropped = center_crop(context_encoding, output_size=[
+                int(w * 2 ** -self.ds_difference),
+                int(h * 2 ** -self.ds_difference)
+            ])
 
-        upsampled = self.upsample(cropped)
-        x = torch.cat((upsampled, main_encoding), dim=1)
+            upsampled = self.upsample(cropped)
+            x = torch.cat((upsampled, main_encoding), dim=1)
 
-        x = self.reduce_fm_conv(x)
+            x = self.reduce_fm_conv(x)
 
-        context_encoding = self.context_logits_conv(context_encoding)
-        context_logits = self.context_logits_fc(torch.squeeze(context_encoding))
+            context_logits = None
+            if self.context_num_classes:
+                context_encoding = self.context_logits_conv(context_encoding)
+                context_logits = self.context_logits_fc(context_encoding.flatten(start_dim=1))
+        else:
+            x = main_encoding
+            context_logits = None
 
         for u in range(len(self.tu)):
             x = self.tu[u](x)

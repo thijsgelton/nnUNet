@@ -14,14 +14,21 @@
 
 
 from collections import OrderedDict
+from multiprocessing import Pool
+from time import sleep
 from typing import Tuple
 
 import numpy as np
 import torch
 import wandb
 
+from nnunet.configuration import default_num_threads
+from nnunet.evaluation.evaluator import aggregate_scores
+from nnunet.inference.segmentation_export import save_segmentation_nifti_from_softmax, save_segmentation_plot
+from nnunet.postprocessing.connected_components import determine_postprocessing
 from nnunet.training.data_augmentation.data_augmentation_moreDA_pathology import get_moreDA_augmentation_pathology
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
+from nnunet.utilities import shutil_sol
 from nnunet.utilities.to_torch import maybe_to_torch, to_cuda
 from nnunet.network_architecture.generic_UNet import Generic_UNet
 from nnunet.network_architecture.initialization import InitWeights_He
@@ -66,6 +73,7 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
         """
         if not self.was_initialized:
             maybe_mkdir_p(self.output_folder)
+            maybe_mkdir_p(join(self.output_folder, "debug_plots"))
 
             if force_load_plans or (self.plans is None):
                 self.load_plans_file()
@@ -182,23 +190,166 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
         output = output[0]
         return super().run_online_evaluation(output, target)
 
-    def validate(self, do_mirroring: bool = True, use_sliding_window: bool = True,
-                 step_size: float = 0.5, save_softmax: bool = True, use_gaussian: bool = True, overwrite: bool = True,
+    def validate(self, do_mirroring: bool = True, use_sliding_window: bool = True, step_size: float = 0.5,
+                 save_softmax: bool = True, use_gaussian: bool = True, overwrite: bool = True,
                  validation_folder_name: str = 'validation_raw', debug: bool = False, all_in_gpu: bool = False,
                  segmentation_export_kwargs: dict = None, run_postprocessing_on_folds: bool = True):
         """
-        We need to wrap this because we need to enforce self.network.do_ds = False for prediction
+        if debug=True then the temporary files generated for postprocessing determination will be kept
         """
-        ds = self.network.do_ds
-        self.network.do_ds = False
-        ret = super().validate(do_mirroring=do_mirroring, use_sliding_window=use_sliding_window, step_size=step_size,
-                               save_softmax=save_softmax, use_gaussian=use_gaussian,
-                               overwrite=overwrite, validation_folder_name=validation_folder_name, debug=debug,
-                               all_in_gpu=all_in_gpu, segmentation_export_kwargs=segmentation_export_kwargs,
-                               run_postprocessing_on_folds=run_postprocessing_on_folds)
 
-        self.network.do_ds = ds
-        return ret
+        current_mode = self.network.training
+        self.network.eval()
+
+        assert self.was_initialized, "must initialize, ideally with checkpoint (or train first)"
+        if self.dataset_val is None:
+            self.load_dataset()
+            self.do_split()
+
+        if segmentation_export_kwargs is None:
+            if 'segmentation_export_params' in self.plans.keys():
+                force_separate_z = self.plans['segmentation_export_params']['force_separate_z']
+                interpolation_order = self.plans['segmentation_export_params']['interpolation_order']
+                interpolation_order_z = self.plans['segmentation_export_params']['interpolation_order_z']
+            else:
+                force_separate_z = None
+                interpolation_order = 1
+                interpolation_order_z = 0
+        else:
+            force_separate_z = segmentation_export_kwargs['force_separate_z']
+            interpolation_order = segmentation_export_kwargs['interpolation_order']
+            interpolation_order_z = segmentation_export_kwargs['interpolation_order_z']
+
+        # predictions as they come from the network go here
+        output_folder = join(self.output_folder, validation_folder_name)
+        maybe_mkdir_p(output_folder)
+        # this is for debug purposes
+        my_input_args = {'do_mirroring': do_mirroring,
+                         'use_sliding_window': use_sliding_window,
+                         'step_size': step_size,
+                         'save_softmax': save_softmax,
+                         'use_gaussian': use_gaussian,
+                         'overwrite': overwrite,
+                         'validation_folder_name': validation_folder_name,
+                         'debug': debug,
+                         'all_in_gpu': all_in_gpu,
+                         'segmentation_export_kwargs': segmentation_export_kwargs,
+                         }
+        save_json(my_input_args, join(output_folder, "validation_args.json"))
+
+        if do_mirroring:
+            if not self.data_aug_params['do_mirror']:
+                raise RuntimeError("We did not train with mirroring so you cannot do inference with mirroring enabled")
+            mirror_axes = self.data_aug_params['mirror_axes']
+        else:
+            mirror_axes = ()
+
+        pred_gt_tuples = []
+
+        export_pool = Pool(default_num_threads)
+        results = []
+
+        for k in self.dataset_val.keys():
+            properties = load_pickle(self.dataset[k]['properties_file'])
+            fname = properties['list_of_data_files'][0].split("/")[-1][:-12]
+            if overwrite or (not isfile(join(output_folder, fname + ".nii.gz"))) or \
+                    (save_softmax and not isfile(join(output_folder, fname + ".npz"))):
+                data = np.load(self.dataset[k]['data_file'])['data']
+
+                print(k, data.shape)
+                data[-1][data[-1] == -1] = 0
+
+                pred, softmax_pred = self.predict_preprocessed_data_return_seg_and_softmax(data[:-1],
+                                                                                           do_mirroring=do_mirroring,
+                                                                                           mirror_axes=mirror_axes,
+                                                                                           use_sliding_window=use_sliding_window,
+                                                                                           step_size=step_size,
+                                                                                           use_gaussian=use_gaussian,
+                                                                                           all_in_gpu=all_in_gpu,
+                                                                                           mixed_precision=self.fp16)
+
+                softmax_pred = softmax_pred.transpose([0] + [i + 1 for i in self.transpose_backward])
+
+                if save_softmax:
+                    softmax_fname = join(output_folder, fname + ".npz")
+                else:
+                    softmax_fname = None
+
+                """There is a problem with python process communication that prevents us from communicating objects
+                larger than 2 GB between processes (basically when the length of the pickle string that will be sent is
+                communicated by the multiprocessing.Pipe object then the placeholder (I think) does not allow for long
+                enough strings (lol). This could be fixed by changing i to l (for long) but that would require manually
+                patching system python code. We circumvent that problem here by saving softmax_pred to a npy file that will
+                then be read (and finally deleted) by the Process. save_segmentation_nifti_from_softmax can take either
+                filename or np.ndarray and will handle this automatically"""
+                if np.prod(softmax_pred.shape) > (2e9 / 4 * 0.85):  # *0.85 just to be save
+                    np.save(join(output_folder, fname + ".npy"), softmax_pred)
+                    softmax_pred = join(output_folder, fname + ".npy")
+
+                export_pool.starmap_async(save_segmentation_plot,
+                                          ((pred[0], data[-1][0], data[:3, 0].transpose(1, 2, 0),
+                                            join(output_folder, fname + ".png")),))
+
+                results.append(export_pool.starmap_async(save_segmentation_nifti_from_softmax,
+                                                         ((softmax_pred, join(output_folder, fname + ".nii.gz"),
+                                                           properties, interpolation_order, self.regions_class_order,
+                                                           None, None,
+                                                           softmax_fname, None, force_separate_z,
+                                                           interpolation_order_z),
+                                                          )
+                                                         )
+                               )
+
+            pred_gt_tuples.append([join(output_folder, fname + ".nii.gz"),
+                                   join(self.gt_niftis_folder, fname + ".nii.gz")])
+
+        _ = [i.get() for i in results]
+        self.print_to_log_file("finished prediction")
+
+        # evaluate raw predictions
+        self.print_to_log_file("evaluation of raw predictions")
+        task = self.dataset_directory.split("/")[-1]
+        job_name = self.experiment_name
+        _ = aggregate_scores(pred_gt_tuples, labels=list(range(self.num_classes)),
+                             json_output_file=join(output_folder, "summary.json"),
+                             json_name=job_name + " val tiled %s" % (str(use_sliding_window)),
+                             json_author="Fabian",
+                             json_task=task, num_threads=default_num_threads)
+
+        if run_postprocessing_on_folds:
+            # in the old nnunet we would stop here. Now we add a postprocessing. This postprocessing can remove everything
+            # except the largest connected component for each class. To see if this improves results, we do this for all
+            # classes and then rerun the evaluation. Those classes for which this resulted in an improved dice score will
+            # have this applied during inference as well
+            self.print_to_log_file("determining postprocessing")
+            determine_postprocessing(self.output_folder, self.gt_niftis_folder, validation_folder_name,
+                                     final_subf_name=validation_folder_name + "_postprocessed", debug=debug)
+            # after this the final predictions for the vlaidation set can be found in validation_folder_name_base + "_postprocessed"
+            # They are always in that folder, even if no postprocessing as applied!
+
+        # detemining postprocesing on a per-fold basis may be OK for this fold but what if another fold finds another
+        # postprocesing to be better? In this case we need to consolidate. At the time the consolidation is going to be
+        # done we won't know what self.gt_niftis_folder was, so now we copy all the niftis into a separate folder to
+        # be used later
+        gt_nifti_folder = join(self.output_folder_base, "gt_niftis")
+        maybe_mkdir_p(gt_nifti_folder)
+        for f in subfiles(self.gt_niftis_folder, suffix=".nii.gz"):
+            success = False
+            attempts = 0
+            e = None
+            while not success and attempts < 10:
+                try:
+                    shutil_sol.copyfile(f, gt_nifti_folder)
+                    success = True
+                except OSError as e:
+                    attempts += 1
+                    sleep(1)
+            if not success:
+                print("Could not copy gt nifti file %s into folder %s" % (f, gt_nifti_folder))
+                if e is not None:
+                    raise e
+
+        self.network.train(current_mode)
 
     def predict_preprocessed_data_return_seg_and_softmax(self, data: np.ndarray, do_mirroring: bool = True,
                                                          mirror_axes: Tuple[int] = None,
@@ -250,7 +401,6 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
         if self.fp16:
             with autocast():
                 output = self.network(data)
-                del data
                 l = self.loss(output, target)
 
             if do_backprop:
@@ -261,7 +411,6 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
                 self.amp_grad_scaler.update()
         else:
             output = self.network(data)
-            del data
             l = self.loss(output, target)
 
             if do_backprop:
@@ -272,8 +421,21 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
         if run_online_evaluation:
             self.run_online_evaluation(output, target)
 
-        del target
+        if not self.network.training:
+            save_segmentation_plot(
+                torch.argmax(output[0][0], dim=0).cpu().numpy(),
+                target[0][0][0].cpu().numpy(),
+                data[0].cpu().numpy().transpose(1, 2, 0),
+                file_path=join(self.output_folder, "debug_plots", data_dict['keys'][0] + ".png")
+            )
+            save_segmentation_plot(
+                torch.argmax(output[0][1], dim=0).cpu().numpy(),
+                target[0][1][0].cpu().numpy(),
+                data[1].cpu().numpy().transpose(1, 2, 0),
+                file_path=join(self.output_folder, "debug_plots", data_dict['keys'][1] + ".png")
+            )
 
+        del target, data
         return l.detach().cpu().numpy()
 
     def do_split(self):
@@ -416,6 +578,7 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
         :return:
         """
         super().on_epoch_end()
+        self.log_to_wandb()
         continue_training = self.epoch < self.max_num_epochs
 
         # it can rarely happen that the momentum of nnUNetTrainerV2 is too high for some dataset. If at epoch 100 the
@@ -448,11 +611,6 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
         ret = super().run_training()
         self.network.do_ds = ds
         return ret
-
-    def on_epoch_end(self):
-        continue_training = super().on_epoch_end()
-        self.log_to_wandb()
-        return continue_training
 
     def log_to_wandb(self):
         wandb.log({
