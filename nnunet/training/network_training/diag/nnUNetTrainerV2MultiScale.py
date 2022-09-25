@@ -56,7 +56,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                  unpack_data=True, deterministic=True, fp16=False, data_origin=None, labels_dict=None, spacing=8.0,
                  target_spacing=0.5, encoder_kwargs=None, convolutional_pooling=True, deepsupervision=True,
                  mapping_key_to_class_json_file=None, context_num_classes=None, use_context=True, max_num_epochs=1000,
-                 plot_validation_results=False):
+                 plot_validation_results=False, initial_lr=1e-2, initial_lr_context=1e-5):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
         self.plot_validation_results = plot_validation_results
@@ -74,8 +74,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             encoder_kwargs = {"arch": "resnet18", "pretrained": "imagenet"}
         self.encoder_kwargs = encoder_kwargs
         self.max_num_epochs = max_num_epochs
-        self.initial_lr = 1e-2
-        self.initial_lr_context = 1e-5
+        self.initial_lr = initial_lr
+        self.initial_lr_context = initial_lr_context
         self.encoder = None
         self.ds_loss_weights, self.deep_supervision_scales = None, None
         self.key_to_class = None
