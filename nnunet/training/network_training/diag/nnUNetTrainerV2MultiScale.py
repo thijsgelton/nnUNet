@@ -81,6 +81,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.key_to_class = None
         self.pin_memory = True
         self.dl_val_full = None
+        self.target_losses, self.context_losses = [], []
         self.do_ds = deepsupervision
         self.use_context = use_context
         self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': False}, {})
@@ -528,29 +529,31 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         if run_online_evaluation:
             self.run_online_evaluation(output, target)
 
-        if not self.network.training and self.plot_validation_results:
+        if not self.network.training and self.plot_validation_results and not self.epoch % 10:
+            root_dir = join(self.output_folder, "debug_plots", str(self.epoch))
+            maybe_mkdir_p(root_dir)
             save_segmentation_plot(
                 torch.argmax(output[0][0], dim=0).cpu().numpy(),
                 target[0][0][0].cpu().numpy(),
                 data[0, 0].cpu().numpy().transpose(1, 2, 0),
-                file_path=join(self.output_folder, "debug_plots", data_dict['keys'][0] + ".png")
-            )
+                file_path=join(root_dir, data_dict['keys'][0] + ".png"))
             save_segmentation_plot(
                 torch.argmax(output[0][1], dim=0).cpu().numpy(),
                 target[0][1][0].cpu().numpy(),
                 data[1, 0].cpu().numpy().transpose(1, 2, 0),
-                file_path=join(self.output_folder, "debug_plots", data_dict['keys'][1] + ".png")
+                file_path=join(root_dir, data_dict['keys'][1] + ".png")
             )
-        del target, data
+
+            del target, data
         return loss.detach().cpu().numpy()
 
     def apply_network(self, context_target, data, target):
         output, context_logits = self.network(data)
         loss = self.loss(output, target)
-        wandb.log({"train/target_loss": loss})
+        self.target_losses.append(loss.detach().cpu().numpy())
         if self.use_context_loss:
-            context_loss = self.context_loss(context_logits, context_target).item()
-            wandb.log({"train/context_loss": context_loss})
+            context_loss = self.context_loss(context_logits, context_target)
+            self.context_losses.append(context_loss.detach().cpu().numpy())
             loss += context_loss
         return loss, output
 
@@ -582,7 +585,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.data_aug_params["do_elastic"] = False
         self.data_aug_params["do_gamma"] = False
         self.data_aug_params["do_additive_brightness"] = True
-        self.data_aug_params["do_mirror"] = True
+        self.data_aug_params["do_mirror"] = False  # TODO: FIX THIS
         self.basic_generator_patch_size = self.patch_size
         self.data_aug_params["do_hed"] = True
         self.data_aug_params["hed_params"] = dict(factor=0.05, p_per_sample=0.5)
@@ -669,12 +672,17 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         return continue_training
 
     def log_to_wandb(self):
-        wandb.log({
+        log = {
             "train/loss": self.all_tr_losses[-1],
             "val/loss": self.all_val_losses[-1],
             **{f'val/metric_{cls_index}': score for cls_index, score in
                self.all_val_eval_metrics_per_class[-1].items() if not np.isnan(score)},
             "val/metric": self.all_val_eval_metrics[-1],
             "learning_rate": self.optimizer.param_groups[0]['lr'],
-            "learning_rate_context": self.optimizer.param_groups[1]['lr'],
-        })
+            "learning_rate_context": self.optimizer.param_groups[1]['lr']
+        }
+        if self.use_context_loss:
+            log.update({"val/context_loss": np.mean(self.context_losses)})
+            log.update({"val/target_loss": np.mean(self.target_losses)})
+            self.context_losses, self.target_losses = [], []
+        wandb.log(log)
