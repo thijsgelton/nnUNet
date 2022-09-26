@@ -27,6 +27,7 @@ from batchgenerators.transforms.utility_transforms import RemoveLabelTransform, 
 
 from nnunet.training.data_augmentation.custom_transforms import Convert3DTo2DTransform, Convert2DTo3DTransform, \
     MaskTransform, ConvertSegmentationToRegionsTransform
+from nnunet.training.data_augmentation.diag.transforms.custom_transforms import MirrorTransform2D
 from nnunet.training.data_augmentation.diag.transforms.pathology_color_transforms import HedTransform, HsvTransform
 from nnunet.training.data_augmentation.default_data_augmentation import default_3D_augmentation_params
 from nnunet.training.data_augmentation.downsampling import DownsampleSegForDSTransform3, DownsampleSegForDSTransform2
@@ -70,12 +71,11 @@ def get_moreDA_augmentation_pathology_no_spatial(dataloader_train, dataloader_va
     #                                            p_per_channel=0.5))
     # tr_transforms.append(BrightnessMultiplicativeTransform(multiplier_range=(0.75, 1.25), p_per_sample=0.15))
     #
-    # if params.get("do_additive_brightness"):
-    #     tr_transforms.append(BrightnessTransform(params.get("additive_brightness_mu"),
-    #                                              params.get("additive_brightness_sigma"),
-    #                                              True, p_per_sample=params.get("additive_brightness_p_per_sample"),
-    #                                              p_per_channel=params.get("additive_brightness_p_per_channel")))
-    #
+    if params.get("do_additive_brightness"):
+        tr_transforms.append(BrightnessTransform(params.get("additive_brightness_mu"),
+                                                 params.get("additive_brightness_sigma"),
+                                                 True, p_per_sample=params.get("additive_brightness_p_per_sample"),
+                                                 p_per_channel=params.get("additive_brightness_p_per_channel")))
     # tr_transforms.append(ContrastAugmentationTransform(p_per_sample=0.15))
     if params.get("do_hed"):
         tr_transforms.append(HedTransform(**params["hed_params"]))
@@ -88,7 +88,7 @@ def get_moreDA_augmentation_pathology_no_spatial(dataloader_train, dataloader_va
                            p_per_sample=params["p_gamma"]))
 
     if params.get("do_mirror") or params.get("mirror"):
-        tr_transforms.append(MirrorTransform(params.get("mirror_axes")))
+        tr_transforms.append(MirrorTransform2D(params.get("mirror_axes")))
 
     if params.get("mask_was_used_for_normalization") is not None:
         mask_was_used_for_normalization = params.get("mask_was_used_for_normalization")

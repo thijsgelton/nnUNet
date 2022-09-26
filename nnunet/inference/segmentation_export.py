@@ -247,7 +247,7 @@ def save_segmentation_nifti(segmentation, out_fname, dct, order=1, force_separat
         sys.stdout = sys.__stdout__
 
 
-def save_segmentation_plot(seg, gt, patch, file_path,
+def save_segmentation_plot(seg, gt, patch, context_patch=None, file_path=None,
                            color_values=['yellow', 'firebrick', 'pink', 'purple', "red", "green", "blue", "blue"]):
     from matplotlib.colors import ListedColormap, BoundaryNorm
 
@@ -255,9 +255,11 @@ def save_segmentation_plot(seg, gt, patch, file_path,
     bounds = list(range(len(color_values)))
     norm = BoundaryNorm(bounds, cmap.N, clip=True)
 
-    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axs = plt.subplots(1, 4 if context_patch else 3, figsize=(15, 5))
     axs[0].imshow(patch)
     axs[1].imshow(gt, cmap=cmap, norm=norm, interpolation='nearest')
     axs[2].imshow(seg, cmap=cmap, norm=norm, interpolation='nearest')
+    if context_patch:
+        axs[3].imshow(context_patch)
     plt.savefig(file_path)
     plt.close()

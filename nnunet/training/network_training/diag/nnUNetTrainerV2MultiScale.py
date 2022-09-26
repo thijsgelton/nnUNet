@@ -122,7 +122,10 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             if self.do_ds:
                 self.wrap_loss_for_deep_supervision()
 
-            self.folder_with_preprocessed_data = join(self.dataset_directory, self.plans['data_identifier'] +
+            self.print_to_log_file(self.plans['data_identifier'])
+
+            self.folder_with_preprocessed_data = join(self.dataset_directory,
+                                                      self.plans['data_identifier'] +
                                                       "_stage%d" % self.stage)
             if training:
                 self.prepare_data()
@@ -370,6 +373,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                 export_pool.starmap_async(save_segmentation_plot,
                                           ((pred[0], data_dict['target'][0][0][0],
                                             data[0].cpu().numpy().transpose(1, 2, 0),
+                                            data[1].cpu().numpy().transpose(1, 2, 0),
                                             join(output_folder, fname + ".png")),))
 
                 results.append(export_pool.starmap_async(save_segmentation_nifti_from_softmax,
@@ -536,11 +540,13 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                 torch.argmax(output[0][0], dim=0).cpu().numpy(),
                 target[0][0][0].cpu().numpy(),
                 data[0, 0].cpu().numpy().transpose(1, 2, 0),
+                data[0, 1].cpu().numpy().transpose(1, 2, 0),
                 file_path=join(root_dir, data_dict['keys'][0] + ".png"))
             save_segmentation_plot(
                 torch.argmax(output[0][1], dim=0).cpu().numpy(),
                 target[0][1][0].cpu().numpy(),
                 data[1, 0].cpu().numpy().transpose(1, 2, 0),
+                data[1, 1].cpu().numpy().transpose(1, 2, 0),
                 file_path=join(root_dir, data_dict['keys'][1] + ".png")
             )
 
@@ -585,12 +591,13 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.data_aug_params["do_elastic"] = False
         self.data_aug_params["do_gamma"] = False
         self.data_aug_params["do_additive_brightness"] = True
-        self.data_aug_params["do_mirror"] = False  # TODO: FIX THIS
+        self.data_aug_params["do_mirror"] = True
+        self.data_aug_params["mirror_axes"] = (0, 1)
         self.basic_generator_patch_size = self.patch_size
         self.data_aug_params["do_hed"] = True
-        self.data_aug_params["hed_params"] = dict(factor=0.05, p_per_sample=0.5)
-        self.data_aug_params["do_hsv"] = False  # HSV can cause artifacts.
-        self.data_aug_params["hsv_params"] = dict(h_lim=0.01, s_lim=0.01, v_lim=0.05)
+        self.data_aug_params["hed_params"] = dict(factor=0.05, p_per_sample=0.75)
+        self.data_aug_params["do_hsv"] = True  # HSV can cause artifacts.
+        self.data_aug_params["hsv_params"] = dict(h_lim=0.00, s_lim=0.00, v_lim=0.05, p_per_sample=0.75)
         self.data_aug_params['selected_seg_channels'] = [0]
         self.data_aug_params['patch_size_for_spatialtransform'] = self.patch_size
         self.data_aug_params["num_cached_per_thread"] = 2
