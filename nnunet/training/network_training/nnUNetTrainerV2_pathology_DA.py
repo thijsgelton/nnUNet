@@ -288,6 +288,7 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
 
                 export_pool.starmap_async(save_segmentation_plot,
                                           ((pred[0], data[-1][0], data[:3, 0].transpose(1, 2, 0),
+                                            data[:3, 1].transpose(1, 2, 0),
                                             join(output_folder, fname + ".png")),))
 
                 results.append(export_pool.starmap_async(save_segmentation_nifti_from_softmax,
