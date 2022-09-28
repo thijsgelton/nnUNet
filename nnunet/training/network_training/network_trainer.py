@@ -282,7 +282,8 @@ class NetworkTrainer(object):
             'plot_stuff': (self.all_tr_losses, self.all_val_losses, self.all_val_losses_tr_mode,
                            self.all_val_eval_metrics, self.all_val_eval_metrics_per_class),
             'best_stuff': (
-            self.best_epoch_based_on_MA_tr_loss, self.best_MA_tr_loss_for_patience, self.best_val_eval_criterion_MA)}
+                self.best_epoch_based_on_MA_tr_loss, self.best_MA_tr_loss_for_patience,
+                self.best_val_eval_criterion_MA)}
         if self.amp_grad_scaler is not None:
             save_this['amp_grad_scaler'] = self.amp_grad_scaler.state_dict()
 
@@ -378,14 +379,15 @@ class NetworkTrainer(object):
             if issubclass(self.lr_scheduler.__class__, _LRScheduler):
                 self.lr_scheduler.step(self.epoch)
 
-        self.all_tr_losses, self.all_val_losses, self.all_val_losses_tr_mode, self.all_val_eval_metrics, \
-        self.all_val_eval_metrics_per_class = checkpoint['plot_stuff']
+        self.all_tr_losses, self.all_val_losses, self.all_val_losses_tr_mode, self.all_val_eval_metrics = \
+            checkpoint['plot_stuff'][:4]
+        self.all_val_eval_metrics_per_class = checkpoint['plot_stuff'][4] if len(
+            checkpoint['plot_stuff']) == 4 else None
 
         # load best loss (if present)
         if 'best_stuff' in checkpoint.keys():
             self.best_epoch_based_on_MA_tr_loss, self.best_MA_tr_loss_for_patience, self.best_val_eval_criterion_MA = \
-            checkpoint[
-                'best_stuff']
+                checkpoint['best_stuff']
 
         # after the training is done, the epoch is incremented one more time in my old code. This results in
         # self.epoch = 1001 for old trained models when the epoch is actually 1000. This causes issues because
