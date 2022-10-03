@@ -36,7 +36,8 @@ from nnunet.training.data_augmentation.data_augmentation_moreDA_pathology_no_spa
 from nnunet.training.data_augmentation.data_augmentation_noDA import get_no_augmentation
 from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params
 from nnunet.training.dataloading.dataset_loading import unpack_dataset
-from nnunet.training.dataloading.diag.dataset_loading_insideroi_multiscale import DataLoader2DROIsMultiScale
+from nnunet.training.dataloading.diag.dataset_loading_insideroi_multiscale import DataLoader2DROIsMultiScale, \
+    DataLoader2DROIsMultiScaleFilename
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
 from nnunet.training.loss_functions.dice_loss import DC_and_CE_loss
@@ -56,9 +57,12 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                  unpack_data=True, deterministic=True, fp16=False, data_origin=None, labels_dict=None, spacing=8.0,
                  target_spacing=0.5, encoder_kwargs=None, convolutional_pooling=True, deepsupervision=True,
                  mapping_key_to_class_json_file=None, context_num_classes=None, use_context=True, max_num_epochs=1000,
-                 plot_validation_results=False, initial_lr=1e-2, initial_lr_context=1e-5):
+                 plot_validation_results=False, initial_lr=1e-2, initial_lr_context=1e-5,
+                 coordinates_in_filename=False, debug_plot_color_values=None, do_bg=False, pin_memory=True):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
+        self.debug_plot_color_values = debug_plot_color_values
+        self.coordinates_in_filename = coordinates_in_filename
         self.plot_validation_results = plot_validation_results
         self.context_num_classes = context_num_classes
         self.mapping_key_to_class_json_file = mapping_key_to_class_json_file
@@ -79,12 +83,12 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.encoder = None
         self.ds_loss_weights, self.deep_supervision_scales = None, None
         self.key_to_class = None
-        self.pin_memory = True
+        self.pin_memory = pin_memory
         self.dl_val_full = None
         self.target_losses, self.context_losses = [], []
         self.do_ds = deepsupervision
         self.use_context = use_context
-        self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': False}, {})
+        self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg}, {})
         if self.use_context_loss:
             self.context_loss = nn.BCEWithLogitsLoss()
 
@@ -155,7 +159,10 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         return weights
 
     def prepare_data(self):
-        self.dl_tr, self.dl_val, self.dl_val_full = self.get_basic_generators()
+        if self.coordinates_in_filename:
+            self.dl_tr, self.dl_val, self.dl_val_full = self.get_basic_generators_filename()
+        else:
+            self.dl_tr, self.dl_val, self.dl_val_full = self.get_basic_generators()
         if self.unpack_data:
             print("unpacking dataset")
             unpack_dataset(self.folder_with_preprocessed_data)
@@ -214,6 +221,54 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             crop_to_patch_size=True
         )
         dl_val_full = DataLoader2DROIsMultiScale(
+            data_origin=self.data_origin,
+            spacing=self.spacing,
+            data=self.dataset_val,
+            final_patch_size=self.patch_size,
+            patch_size=self.patch_size,
+            batch_size=self.batch_size,
+            oversample_foreground_percent=self.oversample_foreground_percent,
+            pad_mode="constant",
+            pad_sides=self.pad_all_sides,
+            memmap_mode='r',
+            training=False,
+            crop_to_patch_size=False
+        )
+
+        return dl_tr, dl_val, dl_val_full
+
+    def get_basic_generators_filename(self):
+        self.load_dataset()
+        self.do_split()
+        dl_tr = DataLoader2DROIsMultiScaleFilename(
+            data_origin=self.data_origin,
+            spacing=self.spacing,
+            data=self.dataset_tr,
+            final_patch_size=self.basic_generator_patch_size,
+            patch_size=self.patch_size,
+            batch_size=self.batch_size,
+            oversample_foreground_percent=self.oversample_foreground_percent,
+            pad_mode="constant",
+            pad_sides=self.pad_all_sides,
+            key_to_class=self.key_to_class,
+            memmap_mode='r'
+        )
+        dl_val = DataLoader2DROIsMultiScaleFilename(
+            data_origin=self.data_origin,
+            spacing=self.spacing,
+            data=self.dataset_val,
+            final_patch_size=self.patch_size,
+            patch_size=self.patch_size,
+            batch_size=self.batch_size,
+            oversample_foreground_percent=self.oversample_foreground_percent,
+            pad_mode="constant",
+            pad_sides=self.pad_all_sides,
+            memmap_mode='r',
+            training=True,
+            key_to_class=self.key_to_class,
+            crop_to_patch_size=True
+        )
+        dl_val_full = DataLoader2DROIsMultiScaleFilename(
             data_origin=self.data_origin,
             spacing=self.spacing,
             data=self.dataset_val,
@@ -536,18 +591,24 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         if not self.network.training and self.plot_validation_results and not self.epoch % 10:
             root_dir = join(self.output_folder, "debug_plots", str(self.epoch))
             maybe_mkdir_p(root_dir)
+            kwargs = lambda batch_number: dict(
+                seg=torch.argmax(output[0][batch_number], dim=0).cpu().numpy(),
+                gt=target[0][batch_number][0].cpu().numpy(),
+                patch=data[batch_number, 0].cpu().numpy().transpose(1, 2, 0),
+                context_patch=data[batch_number, 1].cpu().numpy().transpose(1, 2, 0),
+                file_path=join(root_dir, data_dict['keys'][batch_number] + ".png")
+            )
+            parameters = kwargs(0)
+            if self.debug_plot_color_values:
+                parameters.update(dict(color_values=self.debug_plot_color_values.split(",")))
             save_segmentation_plot(
-                torch.argmax(output[0][0], dim=0).cpu().numpy(),
-                target[0][0][0].cpu().numpy(),
-                data[0, 0].cpu().numpy().transpose(1, 2, 0),
-                data[0, 1].cpu().numpy().transpose(1, 2, 0),
-                file_path=join(root_dir, data_dict['keys'][0] + ".png"))
+                **parameters
+            )
+            parameters = kwargs(1)
+            if self.debug_plot_color_values:
+                parameters.update(dict(color_values=self.debug_plot_color_values.split(",")))
             save_segmentation_plot(
-                torch.argmax(output[0][1], dim=0).cpu().numpy(),
-                target[0][1][0].cpu().numpy(),
-                data[1, 0].cpu().numpy().transpose(1, 2, 0),
-                data[1, 1].cpu().numpy().transpose(1, 2, 0),
-                file_path=join(root_dir, data_dict['keys'][1] + ".png")
+                **parameters
             )
 
             del target, data
@@ -644,22 +705,22 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         return zscore(array.reshape(-1, 3)).reshape(array.shape)
 
     def plot_network_architecture(self):
+        import traceback
         try:
             from batchgenerators.utilities.file_and_folder_operations import join
             import hiddenlayer as hl
             if torch.cuda.is_available():
-                g = hl.build_graph(self.network,
-                                   torch.rand((1, 2, self.num_input_channels, *self.patch_size)).cuda(),
+                g = hl.build_graph(self.network, torch.rand((1, 2, self.num_input_channels, *self.patch_size)).cuda(),
                                    transforms=None)
             else:
-                g = hl.build_graph(self.network,
-                                   torch.rand((1, 2, self.num_input_channels, *self.patch_size)).cuda(),
+                g = hl.build_graph(self.network, torch.rand((1, 2, self.num_input_channels, *self.patch_size)),
                                    transforms=None)
             g.save(join(self.output_folder, "network_architecture.pdf"))
             del g
         except Exception as e:
             self.print_to_log_file("Unable to plot network architecture:")
             self.print_to_log_file(e)
+            self.print_to_log_file(traceback.format_exc())
 
             self.print_to_log_file("\nprinting the network instead:\n")
             self.print_to_log_file(self.network)
