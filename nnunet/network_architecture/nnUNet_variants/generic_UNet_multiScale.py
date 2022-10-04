@@ -58,7 +58,7 @@ class GenericUNetMultiScale(Generic_UNet):
             b_t, c_t, _, _ = nn.Sequential(*self.conv_blocks_context)(torch.zeros((1, 3, 512, 512))).shape
             _, _, self.w_t, self.h_t = nn.Sequential(*self.td)(torch.zeros((1, 3, 512, 512))).shape
         b_e, c_e, w_e, h_e = self.context_encoder(torch.zeros((1, 3, 512, 512))).shape
-        self.ds_difference = int(np.log2(ct_spacing) - np.log2(tg_spacing) - (np.log2(w_e) - np.log2(self.w_t)))
+        self.ds_difference = int(np.log2(ct_spacing) - np.log2(tg_spacing))
         self.upsample = Upsample(scale_factor=2 ** self.ds_difference, mode="bicubic")
         self.reduce_fm_conv = StackedConvLayers(c_t + c_e, c_t, 1,
                                                 self.conv_op, reduce_conv_kwargs, self.norm_op,
