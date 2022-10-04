@@ -52,13 +52,19 @@ class GenericUNetMultiScale(Generic_UNet):
         reduce_conv_kwargs['kernel_size'] = [1, 1]
         reduce_conv_kwargs['padding'] = [0, 0]
 
+        input_dim = 512
         if self.convolutional_pooling:
-            b_t, c_t, self.w_t, self.h_t = nn.Sequential(*self.conv_blocks_context)(torch.zeros((1, 3, 512, 512))).shape
+            b_t, c_t, self.w_t, self.h_t = nn.Sequential(*self.conv_blocks_context)(
+                torch.zeros((1, 3, input_dim, input_dim))).shape
         else:
-            b_t, c_t, _, _ = nn.Sequential(*self.conv_blocks_context)(torch.zeros((1, 3, 512, 512))).shape
-            _, _, self.w_t, self.h_t = nn.Sequential(*self.td)(torch.zeros((1, 3, 512, 512))).shape
-        b_e, c_e, w_e, h_e = self.context_encoder(torch.zeros((1, 3, 512, 512))).shape
-        self.ds_difference = int(np.log2(ct_spacing) - np.log2(tg_spacing))
+            b_t, c_t, _, _ = nn.Sequential(*self.conv_blocks_context)(torch.zeros((1, 3, input_dim, input_dim))).shape
+            _, _, self.w_t, self.h_t = nn.Sequential(*self.td)(torch.zeros((1, 3, input_dim, input_dim))).shape
+        b_e, c_e, w_e, h_e = self.context_encoder(torch.zeros((1, 3, input_dim, input_dim))).shape
+        context_ds = np.log2(input_dim) - np.log2(w_e)
+        target_ds = np.log2(input_dim) - np.log2(self.w_t)
+        resolutional_difference = (np.log2(ct_spacing) + context_ds) - (np.log2(tg_spacing) + target_ds)
+        spatial_difference = (target_ds - context_ds)
+        self.ds_difference = int(resolutional_difference + spatial_difference)
         self.upsample = Upsample(scale_factor=2 ** self.ds_difference, mode="bicubic")
         self.reduce_fm_conv = StackedConvLayers(c_t + c_e, c_t, 1,
                                                 self.conv_op, reduce_conv_kwargs, self.norm_op,
