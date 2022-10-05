@@ -254,7 +254,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
             key_to_class=self.key_to_class,
-            memmap_mode='r'
+            memmap_mode='r+'
         )
         dl_val = DataLoader2DROIsMultiScaleFilename(
             data_origin=self.data_origin,
@@ -266,7 +266,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             oversample_foreground_percent=self.oversample_foreground_percent,
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
-            memmap_mode='r',
+            memmap_mode='r+',
             training=True,
             key_to_class=self.key_to_class,
             crop_to_patch_size=True
@@ -281,7 +281,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             oversample_foreground_percent=self.oversample_foreground_percent,
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
-            memmap_mode='r',
+            memmap_mode='r+',
             training=False,
             crop_to_patch_size=False
         )

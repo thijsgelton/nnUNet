@@ -59,20 +59,20 @@ class GenericUNetMultiScale(Generic_UNet):
         else:
             b_t, c_t, _, _ = nn.Sequential(*self.conv_blocks_context)(torch.zeros((1, 3, input_dim, input_dim))).shape
             _, _, self.w_t, self.h_t = nn.Sequential(*self.td)(torch.zeros((1, 3, input_dim, input_dim))).shape
-        b_e, c_e, w_e, h_e = self.context_encoder(torch.zeros((1, 3, input_dim, input_dim))).shape
-        context_ds = np.log2(input_dim) - np.log2(w_e)
+        b_e, c_e, self.w_e, self.h_e = self.context_encoder(torch.zeros((1, 3, input_dim, input_dim))).shape
+        context_ds = np.log2(input_dim) - np.log2(self.w_e)
         target_ds = np.log2(input_dim) - np.log2(self.w_t)
+        spatial_difference = np.log2(self.w_e) - np.log2(self.w_t)
         resolutional_difference = (np.log2(ct_spacing) + context_ds) - (np.log2(tg_spacing) + target_ds)
-        spatial_difference = (target_ds - context_ds)
-        self.ds_difference = int(resolutional_difference + spatial_difference)
-        self.upsample = Upsample(scale_factor=2 ** self.ds_difference, mode="bicubic")
+        self.ds_difference = int(resolutional_difference) + int(spatial_difference)
+        self.upsample = Upsample(size=self.w_t, mode="bicubic")
         self.reduce_fm_conv = StackedConvLayers(c_t + c_e, c_t, 1,
                                                 self.conv_op, reduce_conv_kwargs, self.norm_op,
                                                 self.norm_op_kwargs, self.dropout_op,
                                                 self.dropout_op_kwargs, self.nonlin, self.nonlin_kwargs,
                                                 basic_block=ConvDropoutNormNonlin)
         reduce_spatial_conv_kwargs = self.conv_kwargs.copy()
-        reduce_spatial_conv_kwargs['kernel_size'] = (w_e - 1, h_e - 1)
+        reduce_spatial_conv_kwargs['kernel_size'] = (self.w_e - 1, self.h_e - 1)
         reduce_spatial_conv_kwargs['padding'] = [0, 0]
         if self.context_num_classes:
             self.context_logits_conv = StackedConvLayers(c_e, c_e // 2, 1, self.conv_op, reduce_spatial_conv_kwargs,
@@ -82,7 +82,7 @@ class GenericUNetMultiScale(Generic_UNet):
             self.context_logits_fc = nn.Sequential(
                 *[nn.Linear(c_e * 2, self.context_num_classes), nn.Dropout(p=0.25)]
             )
-        del b_t, c_t, b_e, c_e, w_e, h_e
+        del b_t, c_t, b_e, c_e, self.w_t, self.h_t, self.w_e, self.h_e
 
     def forward(self, x):
         main = x[:, 0]
@@ -99,7 +99,7 @@ class GenericUNetMultiScale(Generic_UNet):
         if self.use_context:
             context_encoding = self.context_encoder(context)  # 512, 16x16
 
-            w, h = main_encoding.shape[-2:]
+            w, h = context_encoding.shape[-2:]
 
             cropped = center_crop(context_encoding, output_size=[
                 int(w * 2 ** -self.ds_difference),
