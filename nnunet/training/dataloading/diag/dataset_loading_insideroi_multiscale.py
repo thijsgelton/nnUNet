@@ -133,7 +133,8 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
                 case_properties[j]['context_class'] = self.key_to_class[selected_keys[j]]
             data[j] = np.stack([case_all_data_donly,
                                 self.sample_context(case_properties[j], selected_keys[j],
-                                                    case_all_data_donly.shape[-2:])])
+                                                    case_all_data_donly.shape[
+                                                    -2:]) if self.data_origin else np.zeros_like(case_all_data_donly)])
             seg[j] = case_all_data_segonly
 
         keys = selected_keys

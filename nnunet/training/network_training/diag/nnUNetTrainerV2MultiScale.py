@@ -58,9 +58,12 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                  target_spacing=0.5, encoder_kwargs=None, convolutional_pooling=True, deepsupervision=True,
                  mapping_key_to_class_json_file=None, context_num_classes=None, use_context=True, max_num_epochs=1000,
                  plot_validation_results=False, initial_lr=1e-2, initial_lr_context=1e-5,
-                 coordinates_in_filename=False, debug_plot_color_values=None, do_bg=False, pin_memory=True):
+                 coordinates_in_filename=False, debug_plot_color_values=None, do_bg=False, pin_memory=True,
+                 norm_op="instance", data_identifier=None):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
+        self.data_identifier = data_identifier
+        self.norm_op = norm_op
         self.debug_plot_color_values = debug_plot_color_values
         self.coordinates_in_filename = coordinates_in_filename
         self.plot_validation_results = plot_validation_results
@@ -129,7 +132,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             self.print_to_log_file(self.plans['data_identifier'])
 
             self.folder_with_preprocessed_data = join(self.dataset_directory,
-                                                      self.plans['data_identifier'] +
+                                                      (self.data_identifier or self.plans['data_identifier']) +
                                                       "_stage%d" % self.stage)
             if training:
                 self.prepare_data()
@@ -298,7 +301,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         """
         conv_op = nn.Conv2d
         dropout_op = nn.Dropout2d
-        norm_op = nn.InstanceNorm2d
+        norm_op = nn.InstanceNorm2d if self.norm_op is 'instance' else nn.BatchNorm2d
 
         norm_op_kwargs = {'eps': 1e-5, 'affine': True}
         dropout_op_kwargs = {'p': 0, 'inplace': True}
