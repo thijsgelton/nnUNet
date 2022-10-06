@@ -59,9 +59,17 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                  mapping_key_to_class_json_file=None, context_num_classes=None, use_context=True, max_num_epochs=1000,
                  plot_validation_results=False, initial_lr=1e-2, initial_lr_context=1e-5,
                  coordinates_in_filename=False, debug_plot_color_values=None, do_bg=False, pin_memory=True,
-                 norm_op="instance", data_identifier=None):
+                 norm_op="instance", data_identifier=None, loss_class_weights=None, metric_class_weights=None,
+                 use_jaccard=False):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
+        self.metric_class_weights = None
+        if metric_class_weights is not None:
+            self.metric_class_indices = np.where(np.array(metric_class_weights) > 0)[0]
+            self.metric_class_weights = (np.array(metric_class_weights) if np.array(
+                metric_class_weights).sum() == 1 else np.array(metric_class_weights) / np.array(
+                metric_class_weights).sum())[self.metric_class_indices]
+        self.use_jaccard = use_jaccard
         self.data_identifier = data_identifier
         self.norm_op = norm_op
         self.debug_plot_color_values = debug_plot_color_values
@@ -91,7 +99,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.target_losses, self.context_losses = [], []
         self.do_ds = deepsupervision
         self.use_context = use_context
-        self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg}, {})
+        self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg},
+                                   {}, class_weights=loss_class_weights)
         if self.use_context_loss:
             self.context_loss = nn.BCEWithLogitsLoss()
 
@@ -206,7 +215,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
             key_to_class=self.key_to_class,
-            memmap_mode='r'
+            memmap_mode='r+'
         )
         dl_val = DataLoader2DROIsMultiScale(
             data_origin=self.data_origin,
@@ -218,7 +227,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             oversample_foreground_percent=self.oversample_foreground_percent,
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
-            memmap_mode='r',
+            memmap_mode='r+',
             training=True,
             key_to_class=self.key_to_class,
             crop_to_patch_size=True
@@ -233,7 +242,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             oversample_foreground_percent=self.oversample_foreground_percent,
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
-            memmap_mode='r',
+            memmap_mode='r+',
             training=False,
             crop_to_patch_size=False
         )
@@ -301,7 +310,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         """
         conv_op = nn.Conv2d
         dropout_op = nn.Dropout2d
-        norm_op = nn.InstanceNorm2d if self.norm_op is 'instance' else nn.BatchNorm2d
+        norm_op = nn.InstanceNorm2d if self.norm_op == 'instance' else nn.BatchNorm2d
 
         norm_op_kwargs = {'eps': 1e-5, 'affine': True}
         dropout_op_kwargs = {'p': 0, 'inplace': True}
@@ -607,12 +616,13 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             save_segmentation_plot(
                 **parameters
             )
-            parameters = kwargs(1)
-            if self.debug_plot_color_values:
-                parameters.update(dict(color_values=self.debug_plot_color_values.split(",")))
-            save_segmentation_plot(
-                **parameters
-            )
+            if data.shape[0] > 1:
+                parameters = kwargs(1)
+                if self.debug_plot_color_values:
+                    parameters.update(dict(color_values=self.debug_plot_color_values.split(",")))
+                save_segmentation_plot(
+                    **parameters
+                )
 
             del target, data
         return loss.detach().cpu().numpy()
@@ -757,3 +767,47 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             log.update({"val/target_loss": np.mean(self.target_losses)})
             self.context_losses, self.target_losses = [], []
         wandb.log(log)
+
+    def finish_online_evaluation(self):
+        self.online_eval_tp = np.sum(self.online_eval_tp, 0)
+        self.online_eval_fp = np.sum(self.online_eval_fp, 0)
+        self.online_eval_fn = np.sum(self.online_eval_fn, 0)
+        if self.use_jaccard:
+            metric_per_class = self.compute_and_log_jaccard(self.online_eval_tp, self.online_eval_fp,
+                                                            self.online_eval_fn)
+        else:
+            metric_per_class = self.compute_and_log_dice(self.online_eval_tp, self.online_eval_fp, self.online_eval_fn)
+
+        if self.metric_class_weights is not None:
+            assert len(self.metric_class_weights) == len(self.metric_class_indices)
+            average_metric = np.sum(metric_per_class[self.metric_class_indices] * self.metric_class_weights)
+        else:
+            average_metric = np.mean(metric_per_class)
+        self.print_to_log_file(f"Weighted {'jaccard' if self.use_jaccard else 'dice'} is [{average_metric}]")
+        self.all_val_eval_metrics.append(average_metric)
+        self.online_eval_foreground_dc = []
+        self.online_eval_tp = []
+        self.online_eval_fp = []
+        self.online_eval_fn = []
+
+    def compute_and_log_jaccard(self, online_eval_tp, online_eval_fp, online_eval_fn):
+        global_ji_per_class = [i for i in [i / (i + j + k) for i, j, k in
+                                           zip(online_eval_tp, online_eval_fp, online_eval_fn)]
+                               if not np.isnan(i)]
+        self.all_val_eval_metrics_per_class.append(
+            {indx: i / (i + j + k) for indx, (i, j, k) in
+             enumerate(zip(online_eval_tp, online_eval_fp, online_eval_fn))})
+        self.print_to_log_file("Average global foreground Jaccard index:",
+                               [np.round(i, 4) for i in global_ji_per_class])
+        return np.array(global_ji_per_class)
+
+    def compute_and_log_dice(self, online_eval_tp, online_eval_fp, online_eval_fn):
+        global_dc_per_class = [i for i in [2 * i / (2 * i + j + k) for i, j, k in
+                                           zip(online_eval_tp, online_eval_fp, online_eval_fn)]
+                               if not np.isnan(i)]
+        self.all_val_eval_metrics_per_class.append(
+            {indx: 2 * i / (2 * i + j + k) for indx, (i, j, k) in
+             enumerate(zip(online_eval_tp, online_eval_fp, online_eval_fn))})
+        self.print_to_log_file("Average global foreground Dice:",
+                               [np.round(i, 4) for i in global_dc_per_class])
+        return np.array(global_dc_per_class)

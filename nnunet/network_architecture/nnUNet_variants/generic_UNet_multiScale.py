@@ -65,7 +65,7 @@ class GenericUNetMultiScale(Generic_UNet):
         spatial_difference = np.log2(self.w_e) - np.log2(self.w_t)
         resolutional_difference = (np.log2(ct_spacing) + context_ds) - (np.log2(tg_spacing) + target_ds)
         self.ds_difference = int(resolutional_difference) + int(spatial_difference)
-        self.upsample = Upsample(size=self.w_t, mode="bicubic")
+        self.upsample = Upsample(scale_factor=2 ** self.ds_difference, mode="bicubic")
         self.reduce_fm_conv = StackedConvLayers(c_t + c_e, c_t, 1,
                                                 self.conv_op, reduce_conv_kwargs, self.norm_op,
                                                 self.norm_op_kwargs, self.dropout_op,
@@ -106,7 +106,8 @@ class GenericUNetMultiScale(Generic_UNet):
                 int(h * 2 ** -self.ds_difference)
             ])
 
-            upsampled = self.upsample(cropped)
+            # upsampled = self.upsample(cropped)
+            upsampled = nn.functional.interpolate(cropped, size=int(main_encoding.shape[-1]), mode='bicubic')
             x = torch.cat((upsampled, main_encoding), dim=1)
 
             x = self.reduce_fm_conv(x)
@@ -118,6 +119,7 @@ class GenericUNetMultiScale(Generic_UNet):
         else:
             x = main_encoding
             context_logits = None
+        del context, main_encoding
 
         for u in range(len(self.tu)):
             x = self.tu[u](x)
