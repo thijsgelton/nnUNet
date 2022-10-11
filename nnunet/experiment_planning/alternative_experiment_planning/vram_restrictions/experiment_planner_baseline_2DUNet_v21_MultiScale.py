@@ -69,7 +69,7 @@ class ExperimentPlanner2D_v21_MultiScale(ExperimentPlanner2D):
                 get_pool_and_conv_props(current_spacing[1:], tmp, self.unet_featuremap_min_edge_length,
                                         self.force_num_pools or self.unet_max_numpool)
             new_shp[axis_to_be_reduced] -= shape_must_be_divisible_by_new[axis_to_be_reduced]
-            new_shp = [new_shp[axis_to_be_reduced]] * len(new_shp)
+            new_shp = [new_shp[axis_to_be_reduced]] * len(new_shp)  # enforce square input patch size
 
             if self.force_patch_size:
                 new_shp = [self.force_patch_size] * len(new_shp)

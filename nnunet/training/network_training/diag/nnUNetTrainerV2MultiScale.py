@@ -128,12 +128,10 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             self.process_plans(self.plans)
             self.setup_DA_params()
 
-            if self.use_context_loss:
+            if self.use_context_loss and self.mapping_key_to_class_json_file:
                 with open(self.mapping_key_to_class_json_file, "r") as jason:
-                    self.key_to_class = {
-                        k: (torch.tensor([0, 1], dtype=torch.float32) if v > 3 else torch.tensor([1, 0],
-                                                                                                 dtype=torch.float32))
-                        for k, v in json.load(jason).items()}
+                    self.key_to_class = {k: torch.tensor(v, dtype=torch.float16 if self.fp16 else torch.float32) for
+                                         k, v in json.load(jason).items()}
 
             if self.do_ds:
                 self.wrap_loss_for_deep_supervision()
@@ -568,7 +566,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         target = maybe_to_torch(target)
         context_target = None
         if self.use_context_loss:
-            context_target = torch.stack([d['context_class'] for d in data_dict['properties']])
+            context_target = torch.stack([d['context_label'] for d in data_dict['properties']])
             context_target = maybe_to_torch(context_target)
 
         if torch.cuda.is_available():

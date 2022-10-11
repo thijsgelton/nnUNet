@@ -106,7 +106,6 @@ class GenericUNetMultiScale(Generic_UNet):
                 int(h * 2 ** -self.ds_difference)
             ])
 
-            # upsampled = self.upsample(cropped)
             upsampled = nn.functional.interpolate(cropped, size=int(main_encoding.shape[-1]), mode='bicubic')
             x = torch.cat((upsampled, main_encoding), dim=1)
 

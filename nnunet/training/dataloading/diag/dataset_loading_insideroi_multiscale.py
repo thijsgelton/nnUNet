@@ -10,6 +10,8 @@ from wholeslidedata.accessories.asap.parser import AsapAnnotationParser
 from nnunet.training.dataloading.dataset_loading import DataLoader2D
 import re
 
+from nnunet.utilities.to_torch import maybe_to_torch
+
 
 class DataLoader2DROIsMultiScale(DataLoader2D):
     def __init__(self, data_origin, spacing, crop_to_patch_size=True, training=True, key_to_class=None, *args,
@@ -44,6 +46,7 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
         self.spacing = spacing
         self.key_to_class = key_to_class
         super(DataLoader2DROIsMultiScale, self).__init__(*args, **kwargs)
+        self.max_num_class = int(max([values['properties']['classes'][-1] for key, values in self._data.items()]))
 
     def __next__(self):
         return self.generate_train_batch() if self.training else self.generate_single_roi()
@@ -130,7 +133,11 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
                                                                 (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0))),
                                            'constant', **{'constant_values': -1})
             if self.key_to_class:
-                case_properties[j]['context_class'] = self.key_to_class[selected_keys[j]]
+                case_properties[j]['context_label'] = self.key_to_class[i]
+            else:
+                labels = np.zeros(self.max_num_class + 1)
+                labels[self._data[i]['properties']['classes'].astype(int)] = 1
+                case_properties[j]['context_label'] = maybe_to_torch(labels)
             data[j] = np.stack([case_all_data_donly,
                                 self.sample_context(case_properties[j], selected_keys[j],
                                                     case_all_data_donly.shape[
@@ -215,6 +222,7 @@ class DataLoader2DROIsMultiScaleFilename(DataLoader2D):
         self.key_to_class = key_to_class
         self.regex_pattern = re.compile(regex_pattern)
         super(DataLoader2DROIsMultiScaleFilename, self).__init__(*args, **kwargs)
+        self.max_num_class = int(max([values['properties']['classes'][-1] for key, values in self._data.items()]))
 
     def __next__(self):
         return self.generate_train_batch() if self.training else self.generate_single_roi()
@@ -297,7 +305,11 @@ class DataLoader2DROIsMultiScaleFilename(DataLoader2D):
                                                                 (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0))),
                                            'constant', **{'constant_values': -1})
             if self.key_to_class:
-                case_properties[j]['context_class'] = self.key_to_class[selected_keys[j]]
+                case_properties[j]['context_label'] = self.key_to_class[i]
+            else:
+                labels = np.zeros(self.max_num_class + 1)
+                labels[self._data[i]['properties']['classes'].astype(int)] = 1
+                case_properties[j]['context_label'] = maybe_to_torch(labels)
             data[j] = np.stack([case_all_data_donly,
                                 self.sample_context(case_properties[j], x, y, file_name,
                                                     case_all_data_donly.shape[-2:])])
