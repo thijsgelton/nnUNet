@@ -75,12 +75,9 @@ class GenericUNetMultiScale(Generic_UNet):
         reduce_spatial_conv_kwargs['kernel_size'] = (self.w_e - 1, self.h_e - 1)
         reduce_spatial_conv_kwargs['padding'] = [0, 0]
         if self.context_num_classes:
-            self.context_logits_conv = StackedConvLayers(c_e, c_e // 2, 1, self.conv_op, reduce_spatial_conv_kwargs,
-                                                         self.norm_op, self.norm_op_kwargs, self.dropout_op,
-                                                         self.dropout_op_kwargs, self.nonlin, self.nonlin_kwargs,
-                                                         basic_block=ConvDropoutNormNonlin)
+            self.context_logits_conv = nn.AdaptiveAvgPool2d((1, 1))
             self.context_logits_fc = nn.Sequential(
-                *[nn.Linear(c_e * 2, self.context_num_classes), nn.Dropout(p=0.25)]
+                *[nn.Linear(c_e, self.context_num_classes), nn.Dropout(p=0.25)]
             )
         del b_t, c_t, b_e, c_e, self.w_t, self.h_t, self.w_e, self.h_e
 
