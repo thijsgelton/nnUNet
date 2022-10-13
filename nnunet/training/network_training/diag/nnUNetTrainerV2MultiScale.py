@@ -60,9 +60,11 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                  plot_validation_results=False, initial_lr=1e-2, initial_lr_context=1e-5,
                  coordinates_in_filename=False, debug_plot_color_values=None, do_bg=False, pin_memory=True,
                  norm_op="instance", data_identifier=None, loss_class_weights=None, metric_class_weights=None,
-                 use_jaccard=False):
+                 use_jaccard=False, context_label_problem=None, context_file_extension="svs"):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
+        self.context_file_extension = context_file_extension
+        self.context_label_problem = context_label_problem
         self.metric_class_weights = None
         if metric_class_weights is not None:
             self.metric_class_indices = np.where(np.array(metric_class_weights) > 0)[0]
@@ -102,7 +104,12 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg},
                                    {}, class_weights=loss_class_weights)
         if self.use_context_loss:
-            self.context_loss = nn.BCEWithLogitsLoss()
+            if self.key_to_class:
+                self.context_loss = nn.CrossEntropyLoss()
+            elif self.context_label_problem == 'multi_label':
+                self.context_loss = nn.BCEWithLogitsLoss()
+            elif self.context_label_problem == 'regression':
+                self.context_loss = nn.L1Loss()
 
     def initialize(self, training=True, force_load_plans=False):
         """
@@ -261,7 +268,9 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
             key_to_class=self.key_to_class,
-            memmap_mode='r+'
+            memmap_mode='r+',
+            context_label_problem=self.context_label_problem,
+            context_file_extension=self.context_file_extension
         )
         dl_val = DataLoader2DROIsMultiScaleFilename(
             data_origin=self.data_origin,
@@ -276,7 +285,9 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             memmap_mode='r+',
             training=True,
             key_to_class=self.key_to_class,
-            crop_to_patch_size=True
+            crop_to_patch_size=True,
+            context_label_problem=self.context_label_problem,
+            context_file_extension=self.context_file_extension
         )
         dl_val_full = DataLoader2DROIsMultiScaleFilename(
             data_origin=self.data_origin,
@@ -290,7 +301,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_sides=self.pad_all_sides,
             memmap_mode='r+',
             training=False,
-            crop_to_patch_size=False
+            crop_to_patch_size=False,
+            context_file_extension=self.context_file_extension
         )
 
         return dl_tr, dl_val, dl_val_full

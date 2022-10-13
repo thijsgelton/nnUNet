@@ -189,7 +189,8 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
 
 class DataLoader2DROIsMultiScaleFilename(DataLoader2D):
     def __init__(self, data_origin, spacing, crop_to_patch_size=True, training=True, key_to_class=None,
-                 regex_pattern=r"(?P<file>\d+_\d+_\d+)_x_(?P<x>\d+)_y_(?P<y>\d+)",
+                 regex_pattern=r"(?P<file>\d+_\d+_\d+)_x_(?P<x>\d+)_y_(?P<y>\d+)", context_label_problem=None,
+                 context_file_extension="svs",
                  *args, **kwargs):
         """
         This is the basic data loader for 2D networks. It uses preprocessed data as produced by my (Fabian) preprocessing.
@@ -215,6 +216,8 @@ class DataLoader2DROIsMultiScaleFilename(DataLoader2D):
         :param random: sample randomly; CAREFUL! non-random sampling requires batch_size=1, otherwise you will iterate batch_size times over the dataset
         :param pseudo_3d_slices: 7 = 3 below and 3 above the center slice
         """
+        self.context_file_extension = context_file_extension
+        self.context_label_problem = context_label_problem
         self.training = training
         self.crop_to_patch_size = crop_to_patch_size
         self.data_origin = data_origin
@@ -306,9 +309,14 @@ class DataLoader2DROIsMultiScaleFilename(DataLoader2D):
                                            'constant', **{'constant_values': -1})
             if self.key_to_class:
                 case_properties[j]['context_label'] = self.key_to_class[i]
-            else:
+            elif self.context_label_problem == 'multi_label':
                 labels = np.zeros(self.max_num_class + 1)
                 labels[self._data[i]['properties']['classes'].astype(int)] = 1
+                case_properties[j]['context_label'] = maybe_to_torch(labels)
+            elif self.context_label_problem == 'regression':
+                labels = np.zeros(self.max_num_class + 1)
+                lbls, counts = np.unique(case_all_data_segonly, return_counts=True)
+                labels[lbls.astype(int)] = counts / counts.sum()
                 case_properties[j]['context_label'] = maybe_to_torch(labels)
             data[j] = np.stack([case_all_data_donly,
                                 self.sample_context(case_properties[j], x, y, file_name,
@@ -352,7 +360,7 @@ class DataLoader2DROIsMultiScaleFilename(DataLoader2D):
 
     def sample_context(self, props, x, y, file_name, shape=None):
         file_identifier = os.path.join(self.data_origin, file_name)
-        wsi = WholeSlideImage(glob(f"{file_identifier}.svs")[0], backend='asap')
+        wsi = WholeSlideImage(glob(f"{file_identifier}.{self.context_file_extension}")[0], backend='asap')
         x += props.get("offset_x", 0)
         y += props.get("offset_y", 0)
         return wsi.get_patch(x, y, *shape[::-1], spacing=self.spacing).transpose(2, 0, 1) / 255.
