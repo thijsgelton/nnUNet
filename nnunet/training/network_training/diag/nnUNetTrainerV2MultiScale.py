@@ -96,7 +96,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.key_to_class = None
         self.pin_memory = pin_memory
         self.dl_val_full = None
-        self.target_losses, self.context_losses = [], []
+        self.train_context_losses, self.train_target_losses, self.val_context_losses, self.val_target_losses = [[]] * 4
         self.do_ds = deepsupervision
         self.use_context = use_context
         self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg},
@@ -628,10 +628,16 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
     def apply_network(self, context_target, data, target):
         output, context_logits = self.network(data)
         loss = self.loss(output, target)
-        self.target_losses.append(loss.detach().cpu().numpy())
+        if not self.network.training:
+            self.val_target_losses.append(loss.detach().cpu().numpy())
+        else:
+            self.train_target_losses.append(loss.detach().cpu().numpy())
         if self.use_context_loss:
             context_loss = self.context_loss(context_logits, context_target)
-            self.context_losses.append(context_loss.detach().cpu().numpy())
+            if not self.network.training:
+                self.val_context_losses.append(context_loss.detach().cpu().numpy())
+            else:
+                self.train_context_losses.append(context_loss.detach().cpu().numpy())
             loss += context_loss
         return loss, output
 
@@ -761,9 +767,11 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             "learning_rate_context": self.optimizer.param_groups[1]['lr']
         }
         if self.use_context_loss:
-            log.update({"val/context_loss": np.mean(self.context_losses)})
-            log.update({"val/target_loss": np.mean(self.target_losses)})
-            self.context_losses, self.target_losses = [], []
+            log.update({"train/context_loss": np.mean(self.train_context_losses)})
+            log.update({"train/target_loss": np.mean(self.train_target_losses)})
+            log.update({"val/context_loss": np.mean(self.val_context_losses)})
+            log.update({"val/target_loss": np.mean(self.val_target_losses)})
+            self.train_context_losses, self.train_target_losses, self.val_context_losses, self.val_target_losses = [], [], [], []
         wandb.log(log)
 
     def finish_online_evaluation(self):
