@@ -60,7 +60,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                  plot_validation_results=False, initial_lr=1e-2, initial_lr_context=1e-5,
                  coordinates_in_filename=False, debug_plot_color_values=None, do_bg=False, pin_memory=True,
                  norm_op="instance", data_identifier=None, loss_class_weights=None, metric_class_weights=None,
-                 use_jaccard=False, context_label_problem=None, context_file_extension="svs"):
+                 use_jaccard=False, context_label_problem="multi_label", context_file_extension="svs"):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
         self.context_file_extension = context_file_extension
