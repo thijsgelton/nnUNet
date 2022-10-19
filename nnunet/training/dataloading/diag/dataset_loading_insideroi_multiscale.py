@@ -134,9 +134,14 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
                                            'constant', **{'constant_values': -1})
             if self.key_to_class:
                 case_properties[j]['context_label'] = self.key_to_class[i]
-            else:
+            elif self.context_label_problem == 'multi_label':
                 labels = np.zeros(self.max_num_class + 1)
                 labels[self._data[i]['properties']['classes'].astype(int)] = 1
+                case_properties[j]['context_label'] = maybe_to_torch(labels)
+            elif self.context_label_problem == 'regression':
+                labels = np.zeros(self.max_num_class + 1)
+                lbls, counts = np.unique(case_all_data_segonly, return_counts=True)
+                labels[lbls.astype(int)] = counts / counts.sum()
                 case_properties[j]['context_label'] = maybe_to_torch(labels)
             data[j] = np.stack([case_all_data_donly,
                                 self.sample_context(case_properties[j], selected_keys[j],
