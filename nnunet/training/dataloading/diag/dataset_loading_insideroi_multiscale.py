@@ -14,8 +14,8 @@ from nnunet.utilities.to_torch import maybe_to_torch
 
 
 class DataLoader2DROIsMultiScale(DataLoader2D):
-    def __init__(self, data_origin, spacing, crop_to_patch_size=True, training=True, key_to_class=None, *args,
-                 **kwargs):
+    def __init__(self, data_origin, spacing, crop_to_patch_size=True, training=True, key_to_class=None,
+                 context_label_problem=None, *args, **kwargs):
         """
         This is the basic data loader for 2D networks. It uses preprocessed data as produced by my (Fabian) preprocessing.
         You can load the data with load_dataset(folder) where folder is the folder where the npz files are located. If there
@@ -40,6 +40,7 @@ class DataLoader2DROIsMultiScale(DataLoader2D):
         :param random: sample randomly; CAREFUL! non-random sampling requires batch_size=1, otherwise you will iterate batch_size times over the dataset
         :param pseudo_3d_slices: 7 = 3 below and 3 above the center slice
         """
+        self.context_label_problem = context_label_problem
         self.training = training
         self.crop_to_patch_size = crop_to_patch_size
         self.data_origin = data_origin

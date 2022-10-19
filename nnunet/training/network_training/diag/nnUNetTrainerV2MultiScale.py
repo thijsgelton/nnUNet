@@ -220,7 +220,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
             key_to_class=self.key_to_class,
-            memmap_mode='r+'
+            memmap_mode='r+',
+            context_label_problem=self.context_label_problem
         )
         dl_val = DataLoader2DROIsMultiScale(
             data_origin=self.data_origin,
@@ -235,7 +236,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             memmap_mode='r+',
             training=True,
             key_to_class=self.key_to_class,
-            crop_to_patch_size=True
+            crop_to_patch_size=True,
+            context_label_problem=self.context_label_problem
         )
         dl_val_full = DataLoader2DROIsMultiScale(
             data_origin=self.data_origin,
