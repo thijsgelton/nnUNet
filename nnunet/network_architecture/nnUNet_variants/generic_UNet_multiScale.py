@@ -384,7 +384,8 @@ class GenericUNetMultiScale(Generic_UNet):
         slicer = tuple(
             [slice(0, predicted_probabilities.shape[i]) for i in range(len(predicted_probabilities.shape) -
                                                                        (len(slicer) - 1))] + slicer[1:])
-        predicted_probabilities = predicted_probabilities[slicer]
+
+        predicted_probabilities = predicted_probabilities[:, slicer[1], slicer[2]]
 
         if regions_class_order is None:
             predicted_segmentation = predicted_probabilities.argmax(0)
@@ -470,25 +471,12 @@ class GenericUNetMultiScale(Generic_UNet):
         with context():
             with torch.no_grad():
                 if use_sliding_window:
-                    if self.use_context:
-                        res = self._internal_predict_3D_2Dconv_tiled(x, patch_size, do_mirroring, mirror_axes,
-                                                                     step_size,
-                                                                     regions_class_order, use_gaussian, pad_border_mode,
-                                                                     pad_kwargs, all_in_gpu, False)
-                    else:
-                        res = super()._internal_predict_3D_2Dconv_tiled(x, patch_size, do_mirroring, mirror_axes,
-                                                                        step_size,
-                                                                        regions_class_order, use_gaussian,
-                                                                        pad_border_mode,
-                                                                        pad_kwargs, all_in_gpu, False)
-
+                    res = self._internal_predict_3D_2Dconv_tiled(x, patch_size, do_mirroring, mirror_axes,
+                                                                 step_size,
+                                                                 regions_class_order, use_gaussian, pad_border_mode,
+                                                                 pad_kwargs, all_in_gpu, False)
                 else:
-                    if self.use_context:
-                        res = self._internal_predict_3D_2Dconv(x, patch_size, do_mirroring, mirror_axes,
-                                                               regions_class_order,
-                                                               pad_border_mode, pad_kwargs, all_in_gpu, False)
-                    else:
-                        res = super()._internal_predict_3D_2Dconv(x, patch_size, do_mirroring, mirror_axes,
-                                                                  regions_class_order,
-                                                                  pad_border_mode, pad_kwargs, all_in_gpu, False)
+                    res = self._internal_predict_3D_2Dconv(x, patch_size, do_mirroring, mirror_axes,
+                                                           regions_class_order,
+                                                           pad_border_mode, pad_kwargs, all_in_gpu, False)
         return res
