@@ -58,7 +58,7 @@ class nnUNetTrainerV2_pathology_DA(nnUNetTrainer):
         self.initial_lr = 1e-2
         self.deep_supervision_scales = None
         self.ds_loss_weights = None
-        self.data_identifier = kwargs.pop("data_identifier")
+        self.data_identifier = kwargs.pop("data_identifier", None)
         self.pin_memory = True
 
     def initialize(self, training=True, force_load_plans=False):

@@ -103,7 +103,7 @@ class GenericUNetMultiScale(Generic_UNet):
                 int(h * 2 ** -self.ds_difference)
             ])
 
-            upsampled = nn.functional.interpolate(cropped, size=int(main_encoding.shape[-1]), mode='bicubic')
+            upsampled = nn.functional.interpolate(cropped, size=list(main_encoding.shape[-2:]), mode='bicubic')
             x = torch.cat((upsampled, main_encoding), dim=1)
 
             x = self.reduce_fm_conv(x)
@@ -343,6 +343,61 @@ class GenericUNetMultiScale(Generic_UNet):
 
         return predicted_segmentation, softmax_pred
 
+    def _internal_predict_3D_2Dconv(self, x: np.ndarray, min_size: Tuple[int, int], do_mirroring: bool,
+                                    mirror_axes: tuple = (0, 1), regions_class_order: tuple = None,
+                                    pad_border_mode: str = "constant", pad_kwargs: dict = None,
+                                    all_in_gpu: bool = False, verbose: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+        if all_in_gpu:
+            raise NotImplementedError
+        assert len(x.shape) == 4, "data must be c, x, y, z"
+        predicted_segmentation = []
+        softmax_pred = []
+        x = x[:, None]
+        for s in range(x.shape[1]):
+            pred_seg, softmax_pres = self._internal_predict_2D_2Dconv(
+                x[:, s], min_size, do_mirroring, mirror_axes, regions_class_order, pad_border_mode, pad_kwargs, verbose)
+            predicted_segmentation.append(pred_seg[None])
+            softmax_pred.append(softmax_pres[None])
+        predicted_segmentation = np.vstack(predicted_segmentation)
+        softmax_pred = np.vstack(softmax_pred).transpose((1, 0, 2, 3))
+        return predicted_segmentation, softmax_pred
+
+    def _internal_predict_2D_2Dconv(self, x: np.ndarray, min_size: Tuple[int, int], do_mirroring: bool,
+                                    mirror_axes: tuple = (0, 1, 2), regions_class_order: tuple = None,
+                                    pad_border_mode: str = "constant", pad_kwargs: dict = None,
+                                    verbose: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        This one does fully convolutional inference. No sliding window
+        """
+        assert len(x.shape) == 4, "x must be (c, x, y)"
+
+        assert self.input_shape_must_be_divisible_by is not None, 'input_shape_must_be_divisible_by must be set to ' \
+                                                                  'run _internal_predict_2D_2Dconv'
+        if verbose: print("do mirror:", do_mirroring)
+
+        data, slicer = pad_nd_image(x, min_size, pad_border_mode, pad_kwargs, True,
+                                    self.input_shape_must_be_divisible_by)
+
+        predicted_probabilities = self._internal_maybe_mirror_and_pred_2D(data[None], mirror_axes, do_mirroring,
+                                                                          None)[0]
+
+        slicer = tuple(
+            [slice(0, predicted_probabilities.shape[i]) for i in range(len(predicted_probabilities.shape) -
+                                                                       (len(slicer) - 1))] + slicer[1:])
+        predicted_probabilities = predicted_probabilities[slicer]
+
+        if regions_class_order is None:
+            predicted_segmentation = predicted_probabilities.argmax(0)
+            predicted_segmentation = predicted_segmentation.detach().cpu().numpy()
+            predicted_probabilities = predicted_probabilities.detach().cpu().numpy()
+        else:
+            predicted_probabilities = predicted_probabilities.detach().cpu().numpy()
+            predicted_segmentation = np.zeros(predicted_probabilities.shape[1:], dtype=np.float32)
+            for i, c in enumerate(regions_class_order):
+                predicted_segmentation[predicted_probabilities[i] > 0.5] = c
+
+        return predicted_segmentation, predicted_probabilities
+
     def predict_3D(self, x: np.ndarray, do_mirroring: bool, mirror_axes: Tuple[int, ...] = (0, 1, 2),
                    use_sliding_window: bool = False,
                    step_size: float = 0.5, patch_size: Tuple[int, ...] = None,
@@ -414,28 +469,26 @@ class GenericUNetMultiScale(Generic_UNet):
 
         with context():
             with torch.no_grad():
-                if self.conv_op == nn.Conv3d:
-                    if use_sliding_window:
-                        res = self._internal_predict_3D_3Dconv_tiled(x, step_size, do_mirroring, mirror_axes,
-                                                                     patch_size,
-                                                                     regions_class_order, use_gaussian, pad_border_mode,
-                                                                     pad_kwargs=pad_kwargs, all_in_gpu=all_in_gpu,
-                                                                     verbose=verbose)
-                    else:
-                        res = self._internal_predict_3D_3Dconv(x, patch_size, do_mirroring, mirror_axes,
-                                                               regions_class_order,
-                                                               pad_border_mode, pad_kwargs=pad_kwargs, verbose=verbose)
-                elif self.conv_op == nn.Conv2d:
-                    if use_sliding_window:
+                if use_sliding_window:
+                    if self.use_context:
                         res = self._internal_predict_3D_2Dconv_tiled(x, patch_size, do_mirroring, mirror_axes,
                                                                      step_size,
                                                                      regions_class_order, use_gaussian, pad_border_mode,
                                                                      pad_kwargs, all_in_gpu, False)
                     else:
+                        res = super()._internal_predict_3D_2Dconv_tiled(x, patch_size, do_mirroring, mirror_axes,
+                                                                        step_size,
+                                                                        regions_class_order, use_gaussian,
+                                                                        pad_border_mode,
+                                                                        pad_kwargs, all_in_gpu, False)
+
+                else:
+                    if self.use_context:
                         res = self._internal_predict_3D_2Dconv(x, patch_size, do_mirroring, mirror_axes,
                                                                regions_class_order,
                                                                pad_border_mode, pad_kwargs, all_in_gpu, False)
-                else:
-                    raise RuntimeError("Invalid conv op, cannot determine what dimensionality (2d/3d) the network is")
-
+                    else:
+                        res = super()._internal_predict_3D_2Dconv(x, patch_size, do_mirroring, mirror_axes,
+                                                                  regions_class_order,
+                                                                  pad_border_mode, pad_kwargs, all_in_gpu, False)
         return res
