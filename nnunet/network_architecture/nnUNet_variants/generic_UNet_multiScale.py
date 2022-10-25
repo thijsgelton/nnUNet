@@ -13,6 +13,8 @@
 #    limitations under the License.
 from typing import Union, Tuple
 
+import matplotlib.pyplot as plt
+
 import numpy as np
 import torch
 import torch.nn.functional
@@ -79,11 +81,21 @@ class GenericUNetMultiScale(Generic_UNet):
             self.context_logits_fc = nn.Sequential(
                 *[nn.Linear(c_e, self.context_num_classes), nn.Dropout(p=0.25)]
             )
+        self.counter = 0
         del b_t, c_t, b_e, c_e, self.w_t, self.h_t, self.w_e, self.h_e
 
     def forward(self, x):
         main = x[:, 0]
         context = x[:, 1]
+        #
+        # fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+        # axs[0].imshow(main[0].detach().cpu().numpy().transpose(1, 2, 0))
+        # axs[1].imshow(context[0].detach().cpu().numpy().transpose(1, 2, 0))
+        # plt.savefig(
+        #     f"/data/pathology/projects/pathology-endoaid/phase 3 - nnUNet/nnUNet_raw_data_base_6cl_revised/test_{self.counter}.png")
+        # self.counter += 1
+        # plt.close()
+
         skips = []
         seg_outputs = []
         for d in range(len(self.conv_blocks_context) - 1):
