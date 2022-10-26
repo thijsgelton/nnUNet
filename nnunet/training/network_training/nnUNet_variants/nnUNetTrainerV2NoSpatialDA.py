@@ -30,6 +30,7 @@ from nnunet.network_architecture.neural_network import SegmentationNetwork
 from nnunet.training.data_augmentation.data_augmentation_moreDA import get_moreDA_augmentation
 from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params
 from nnunet.training.dataloading.dataset_loading import unpack_dataset
+from nnunet.training.dataloading.diag.dataset_loading_insideroi_multiscale import DataLoader2DROIsMultiScale
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
 from nnunet.training.network_training.nnUNetTrainer import nnUNetTrainer
@@ -107,10 +108,9 @@ class nnUNetTrainerV2NoSpatialDA(nnUNetTrainer):
 
                 self.tr_gen, self.val_gen = get_moreDA_augmentation_pathology_no_spatial(
                     self.dl_tr, self.dl_val,
-                    self.data_aug_params,
+                    params=self.data_aug_params,
                     deep_supervision_scales=self.deep_supervision_scales,
-                    pin_memory=self.pin_memory,
-                    use_nondetMultiThreadedAugmenter=False
+                    pin_memory=self.pin_memory
                 )
                 self.print_to_log_file("TRAINING KEYS:\n %s" % (str(self.dataset_tr.keys())),
                                        also_print_to_console=False)
@@ -126,6 +126,42 @@ class nnUNetTrainerV2NoSpatialDA(nnUNetTrainer):
         else:
             self.print_to_log_file('self.was_initialized is True, not running self.initialize again')
         self.was_initialized = True
+
+    def get_basic_generators(self):
+        self.load_dataset()
+        self.do_split()
+        dl_tr = DataLoader2DROIsMultiScale(
+            data_origin=None,
+            spacing=None,
+            data=self.dataset_tr,
+            final_patch_size=self.basic_generator_patch_size,
+            patch_size=self.patch_size,
+            batch_size=self.batch_size,
+            oversample_foreground_percent=self.oversample_foreground_percent,
+            pad_mode="constant",
+            pad_sides=self.pad_all_sides,
+            key_to_class=None,
+            memmap_mode='r+',
+            context_label_problem=None
+        )
+        dl_val = DataLoader2DROIsMultiScale(
+            data_origin=None,
+            spacing=None,
+            data=self.dataset_val,
+            final_patch_size=self.patch_size,
+            patch_size=self.patch_size,
+            batch_size=self.batch_size,
+            oversample_foreground_percent=self.oversample_foreground_percent,
+            pad_mode="constant",
+            pad_sides=self.pad_all_sides,
+            memmap_mode='r+',
+            training=True,
+            key_to_class=None,
+            crop_to_patch_size=True,
+            context_label_problem=None
+        )
+
+        return dl_tr, dl_val
 
     def initialize_network(self):
         """
@@ -246,7 +282,7 @@ class nnUNetTrainerV2NoSpatialDA(nnUNetTrainer):
 
         if self.fp16:
             with autocast():
-                output = self.network(data)
+                output = self.network(data[:, 0])
 
                 if not self.network.training and not self.epoch % 10:
                     root_dir = join(self.output_folder, "debug_plots", str(self.epoch))
@@ -254,7 +290,7 @@ class nnUNetTrainerV2NoSpatialDA(nnUNetTrainer):
                     kwargs = lambda batch_number: dict(
                         seg=torch.argmax(output[0][batch_number], dim=0).cpu().numpy(),
                         gt=target[0][batch_number][0].cpu().numpy(),
-                        patch=data[batch_number].cpu().numpy().transpose(1, 2, 0),
+                        patch=data[batch_number, 0].cpu().numpy().transpose(1, 2, 0),
                         file_path=join(root_dir, data_dict['keys'][batch_number] + ".png")
                     )
                     parameters = kwargs(0)

@@ -73,10 +73,7 @@ class MirrorTransform2D(AbstractTransform):
                 sample_seg = None
                 if seg is not None:
                     sample_seg = seg[b]
-                if data[b].ndim == 4:
-                    ret_val = self.augment_mirroring(data[b], sample_seg, axes=self.axes)
-                elif data[b].ndim == 3:
-                    ret_val = augment_mirroring(data[b], sample_seg, axes=self.axes)
+                ret_val = self.augment_mirroring(data[b], sample_seg, axes=self.axes)
                 data[b] = ret_val[0]
                 if seg is not None:
                     seg[b] = ret_val[1]
@@ -102,30 +99,3 @@ class MirrorTransform2D(AbstractTransform):
             if sample_seg is not None:
                 sample_seg[:, :, :] = sample_seg[:, :, ::-1]
         return sample_data, sample_seg
-
-
-def augment_mirroring(sample_data, sample_seg=None, sample_weightmap=None, axes=(0, 1, 2)):
-    if (len(sample_data.shape) != 3) and (len(sample_data.shape) != 4):
-        raise Exception(
-            "Invalid dimension for sample_data and sample_seg. sample_data and sample_seg should be either "
-            "[channels, x, y] or [channels, x, y, z]")
-    if 0 in axes and np.random.uniform() < 0.5:
-        sample_data[:, :] = sample_data[:, ::-1]
-        if sample_seg is not None:
-            sample_seg[:, :] = sample_seg[:, ::-1]
-        if sample_weightmap is not None:
-            sample_weightmap[:, :] = sample_weightmap[:, ::-1]
-    if 1 in axes and np.random.uniform() < 0.5:
-        sample_data[:, :, :] = sample_data[:, :, ::-1]
-        if sample_seg is not None:
-            sample_seg[:, :, :] = sample_seg[:, :, ::-1]
-        if sample_weightmap is not None:
-            sample_weightmap[:, :, :] = sample_weightmap[:, :, ::-1]
-    if 2 in axes and len(sample_data.shape) == 4:
-        if np.random.uniform() < 0.5:
-            sample_data[:, :, :, :] = sample_data[:, :, :, ::-1]
-            if sample_seg is not None:
-                sample_seg[:, :, :, :] = sample_seg[:, :, :, ::-1]
-            if sample_weightmap is not None:
-                sample_weightmap[:, :, :, :] = sample_weightmap[:, :, :, ::-1]
-    return sample_data, sample_seg, sample_weightmap
