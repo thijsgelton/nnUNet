@@ -11,13 +11,16 @@
 #    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
-
+import albumentations as A
+import numpy as np
 from batchgenerators.dataloading.multi_threaded_augmenter import MultiThreadedAugmenter
 from batchgenerators.transforms.abstract_transforms import Compose
 from batchgenerators.transforms.channel_selection_transforms import DataChannelSelectionTransform, \
     SegChannelSelectionTransform
-from batchgenerators.transforms.color_transforms import BrightnessTransform
+from batchgenerators.transforms.color_transforms import BrightnessTransform, BrightnessMultiplicativeTransform, \
+    ContrastAugmentationTransform
 from batchgenerators.transforms.color_transforms import GammaTransform
+from batchgenerators.transforms.noise_transforms import GaussianBlurTransform, GaussianNoiseTransform
 from batchgenerators.transforms.utility_transforms import RemoveLabelTransform, RenameTransform, NumpyToTensor
 
 from nnunet.training.data_augmentation.custom_transforms import Convert3DTo2DTransform, Convert2DTo3DTransform, \
@@ -34,6 +37,106 @@ try:
     from batchgenerators.dataloading.nondet_multi_threaded_augmenter import NonDetMultiThreadedAugmenter
 except ImportError as ie:
     NonDetMultiThreadedAugmenter = None
+
+
+class AlbuRandomRotate90:
+
+    def __init__(self, data_key="data"):
+        self.data_key = data_key
+        self.rotate = A.ReplayCompose([A.RandomRotate90(p=1.0)])
+
+    def __call__(self, **data_dict):
+        data = data_dict.get(self.data_key)
+
+        for b in range(data.shape[0]):
+            if data[b].ndim == 4:
+                d = data[b].transpose(0, 2, 3, 1)
+                init = self.rotate(image=d[0])
+                d = np.stack([init['image']] + [A.ReplayCompose.replay(init['replay'], image=d[i])['image'] for i in
+                                                range(1, d.shape[0])])
+                d = d.transpose(0, 3, 1, 2)
+            else:
+                d = data[b].transpose(1, 2, 0)
+                d = self.rotate(image=d)['image']
+                d = d.transpose(2, 0, 1)
+            data[b] = d
+        data_dict[self.data_key] = data
+        return data_dict
+
+
+class AlbuGaussianBlur:
+
+    def __init__(self, data_key="data"):
+        self.data_key = data_key
+        self.aug = A.ReplayCompose([A.GaussianBlur(p=1.0)])
+
+    def __call__(self, **data_dict):
+        data = data_dict.get(self.data_key)
+
+        for b in range(data.shape[0]):
+            if data[b].ndim == 4:
+                d = data[b].transpose(0, 2, 3, 1)
+                init = self.aug(image=d[0])
+                d = np.stack([init['image']] + [A.ReplayCompose.replay(init['replay'], image=d[i])['image'] for i in
+                                                range(1, d.shape[0])])
+                d = d.transpose(0, 3, 1, 2)
+            else:
+                d = data[b].transpose(1, 2, 0)
+                d = self.aug(image=d)['image']
+                d = d.transpose(2, 0, 1)
+            data[b] = d
+        data_dict[self.data_key] = data
+        return data_dict
+
+
+class AlbuGaussionNoise:
+
+    def __init__(self, data_key="data"):
+        self.data_key = data_key
+        self.aug = A.ReplayCompose([A.GaussNoise(p=1.0)])
+
+    def __call__(self, **data_dict):
+        data = data_dict.get(self.data_key)
+
+        for b in range(data.shape[0]):
+            if data[b].ndim == 4:
+                d = data[b].transpose(0, 2, 3, 1)
+                init = self.aug(image=d[0])
+                d = np.stack([init['image']] + [A.ReplayCompose.replay(init['replay'], image=d[i])['image'] for i in
+                                                range(1, d.shape[0])])
+                d = d.transpose(0, 3, 1, 2)
+            else:
+                d = data[b].transpose(1, 2, 0)
+                d = self.aug(image=d)['image']
+                d = d.transpose(2, 0, 1)
+            data[b] = d
+        data_dict[self.data_key] = data
+        return data_dict
+
+
+class AlbuRandomBrightness:
+
+    def __init__(self, data_key="data"):
+        self.data_key = data_key
+        self.aug = A.ReplayCompose([A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0, p=1.0)])
+
+    def __call__(self, **data_dict):
+        data = data_dict.get(self.data_key)
+
+        for b in range(data.shape[0]):
+            if data[b].ndim == 4:
+                d = data[b].transpose(0, 2, 3, 1)
+                init = self.aug(image=d[0])
+                d = np.stack([init['image']] + [A.ReplayCompose.replay(init['replay'], image=d[i])['image'] for i in
+                                                range(1, d.shape[0])])
+                d = d.transpose(0, 3, 1, 2)
+            else:
+                d = data[b].transpose(1, 2, 0)
+                d = self.aug(image=d)['image']
+                d = d.transpose(2, 0, 1)
+            data[b] = d
+        data_dict[self.data_key] = data
+        return data_dict
 
 
 def get_moreDA_augmentation_pathology_no_spatial(dataloader_train, dataloader_val,
@@ -61,17 +164,17 @@ def get_moreDA_augmentation_pathology_no_spatial(dataloader_train, dataloader_va
 
     # we need to put the color augmentations after the dummy 2d part (if applicable). Otherwise the overloaded color
     # channel gets in the way
-    # tr_transforms.append(GaussianNoiseTransform(p_per_sample=0.1))
-    # tr_transforms.append(GaussianBlurTransform((0.5, 1.), different_sigma_per_channel=True, p_per_sample=0.2,
-    #                                            p_per_channel=0.5))
-    # tr_transforms.append(BrightnessMultiplicativeTransform(multiplier_range=(0.75, 1.25), p_per_sample=0.15))
+    # tr_transforms.append(AlbuGaussionNoise())
+    tr_transforms.append(AlbuGaussianBlur())
+    tr_transforms.append(AlbuRandomBrightness())
+    tr_transforms.append(AlbuRandomRotate90())
     #
     if params.get("do_additive_brightness"):
         tr_transforms.append(BrightnessTransform(params.get("additive_brightness_mu"),
                                                  params.get("additive_brightness_sigma"),
                                                  True, p_per_sample=params.get("additive_brightness_p_per_sample"),
                                                  p_per_channel=params.get("additive_brightness_p_per_channel")))
-    # tr_transforms.append(ContrastAugmentationTransform(p_per_sample=0.15))
+    tr_transforms.append(ContrastAugmentationTransform(p_per_sample=0.15))
     if params.get("do_hed"):
         tr_transforms.append(HedTransform(**params["hed_params"]))
     if params.get("do_hsv"):

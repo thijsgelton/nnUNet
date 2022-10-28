@@ -34,7 +34,8 @@ from nnunet.postprocessing.connected_components import determine_postprocessing
 from nnunet.training.data_augmentation.data_augmentation_moreDA_pathology_no_spatial import \
     get_moreDA_augmentation_pathology_no_spatial
 from nnunet.training.data_augmentation.data_augmentation_noDA import get_no_augmentation
-from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params
+from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params, \
+    default_3D_augmentation_params, get_patch_size
 from nnunet.training.dataloading.dataset_loading import unpack_dataset
 from nnunet.training.dataloading.diag.dataset_loading_insideroi_multiscale import DataLoader2DROIsMultiScale, \
     DataLoader2DROIsMultiScaleFilename
@@ -60,7 +61,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                  plot_validation_results=False, initial_lr=1e-2, initial_lr_context=1e-5,
                  coordinates_in_filename=False, debug_plot_color_values=None, do_bg=False, pin_memory=True,
                  norm_op="instance", data_identifier=None, loss_class_weights=None, metric_class_weights=None,
-                 use_jaccard=False, context_label_problem="multi_label", context_file_extension="svs"):
+                 use_jaccard=False, context_label_problem="multi_label", context_file_extension="svs",
+                 name_of_data_augs="no_spatial"):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
         self.context_file_extension = context_file_extension
@@ -101,6 +103,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.train_context_losses, self.train_target_losses, self.val_context_losses, self.val_target_losses = [[]] * 4
         self.do_ds = deepsupervision
         self.use_context = use_context
+        self.name_of_data_augs = name_of_data_augs
         self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg},
                                    {}, class_weights=loss_class_weights)
         if self.use_context_loss:
@@ -133,7 +136,13 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             if not encoder_trainable:
                 self.encoder.eval()
             self.process_plans(self.plans)
-            self.setup_DA_params()
+
+            if self.name_of_data_augs == "no_spatial":
+                self.setup_DA_params()
+            elif self.name_of_data_augs == "all":
+                self.setup_DA_params_with_spatial()
+            else:
+                self.setup_no_DA_params()
 
             if self.use_context_loss and self.mapping_key_to_class_json_file:
                 with open(self.mapping_key_to_class_json_file, "r") as jason:
@@ -692,6 +701,84 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.data_aug_params["hsv_params"] = dict(h_lim=0.00, s_lim=0.00, v_lim=0.05, p_per_sample=0.75)
         self.data_aug_params['selected_seg_channels'] = [0]
         self.data_aug_params['patch_size_for_spatialtransform'] = self.patch_size
+        self.data_aug_params["num_cached_per_thread"] = 2
+
+    def setup_no_DA_params(self):
+        """
+        Specific to multiscale. No spatial translations that can misalign the target and context patches. So, flips
+        are allowed and colour transformations.
+        """
+        if self.do_ds:
+            self.deep_supervision_scales = [[1, 1, 1]] + list(list(i) for i in 1 / np.cumprod(
+                np.vstack(self.net_num_pool_op_kernel_sizes), axis=0))[:-1]
+        self.data_aug_params = default_2D_augmentation_params
+        self.data_aug_params["mask_was_used_for_normalization"] = self.use_mask_for_norm
+        self.data_aug_params["do_scaling"] = False
+        self.data_aug_params["do_rotation"] = False
+        self.data_aug_params["do_elastic"] = False
+        self.data_aug_params["do_gamma"] = False
+        self.data_aug_params["do_additive_brightness"] = False
+        self.data_aug_params["do_mirror"] = False
+        self.data_aug_params["mirror_axes"] = (0, 1)
+        self.basic_generator_patch_size = self.patch_size
+        self.data_aug_params["do_hed"] = False
+        self.data_aug_params["hed_params"] = dict(factor=0.05, p_per_sample=0.75)
+        self.data_aug_params["do_hsv"] = False  # HSV can cause artifacts.
+        self.data_aug_params["hsv_params"] = dict(h_lim=0.00, s_lim=0.00, v_lim=0.05, p_per_sample=0.75)
+        self.data_aug_params['selected_seg_channels'] = [0]
+        self.data_aug_params['patch_size_for_spatialtransform'] = self.patch_size
+        self.data_aug_params["num_cached_per_thread"] = 2
+
+    def setup_DA_params_with_spatial(self):
+        """
+        - we increase roation angle from [-15, 15] to [-30, 30]
+        - scale range is now (0.7, 1.4), was (0.85, 1.25)
+        - we don't do elastic deformation anymore
+
+        :return:
+        """
+
+        self.deep_supervision_scales = [[1, 1, 1]] + list(list(i) for i in 1 / np.cumprod(
+            np.vstack(self.net_num_pool_op_kernel_sizes), axis=0))[:-1]
+
+        if self.threeD:
+            self.data_aug_params = default_3D_augmentation_params
+            self.data_aug_params['rotation_x'] = (-30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
+            self.data_aug_params['rotation_y'] = (-30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
+            self.data_aug_params['rotation_z'] = (-30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
+            if self.do_dummy_2D_aug:
+                self.data_aug_params["dummy_2D"] = True
+                self.print_to_log_file("Using dummy2d data augmentation")
+                self.data_aug_params["elastic_deform_alpha"] = \
+                    default_2D_augmentation_params["elastic_deform_alpha"]
+                self.data_aug_params["elastic_deform_sigma"] = \
+                    default_2D_augmentation_params["elastic_deform_sigma"]
+                self.data_aug_params["rotation_x"] = default_2D_augmentation_params["rotation_x"]
+        else:
+            self.do_dummy_2D_aug = False
+            if max(self.patch_size) / min(self.patch_size) > 1.5:
+                default_2D_augmentation_params['rotation_x'] = (-15. / 360 * 2. * np.pi, 15. / 360 * 2. * np.pi)
+            self.data_aug_params = default_2D_augmentation_params
+        self.data_aug_params["mask_was_used_for_normalization"] = self.use_mask_for_norm
+
+        if self.do_dummy_2D_aug:
+            self.basic_generator_patch_size = get_patch_size(self.patch_size[1:],
+                                                             self.data_aug_params['rotation_x'],
+                                                             self.data_aug_params['rotation_y'],
+                                                             self.data_aug_params['rotation_z'],
+                                                             self.data_aug_params['scale_range'])
+            self.basic_generator_patch_size = np.array([self.patch_size[0]] + list(self.basic_generator_patch_size))
+        else:
+            self.basic_generator_patch_size = get_patch_size(self.patch_size, self.data_aug_params['rotation_x'],
+                                                             self.data_aug_params['rotation_y'],
+                                                             self.data_aug_params['rotation_z'],
+                                                             self.data_aug_params['scale_range'])
+
+        self.data_aug_params["scale_range"] = (0.7, 1.4)
+        self.data_aug_params["do_elastic"] = False
+        self.data_aug_params['selected_seg_channels'] = [0]
+        self.data_aug_params['patch_size_for_spatialtransform'] = self.patch_size
+
         self.data_aug_params["num_cached_per_thread"] = 2
 
     def maybe_update_lr(self, epoch=None):
