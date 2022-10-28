@@ -165,7 +165,6 @@ class GenericUNetMultiScale(Generic_UNet):
         else:
             mirror_idx = 1
             num_results = 1
-
         for m in range(mirror_idx):
             if m == 0:
                 pred = self.inference_apply_nonlin(self(x)[0])
@@ -274,6 +273,9 @@ class GenericUNetMultiScale(Generic_UNet):
                 add_for_nb_of_preds = np.ones(patch_size, dtype=np.float32)
             aggregated_results = np.zeros([self.num_classes] + list(data.shape[1:]), dtype=np.float32)
             aggregated_nb_of_predictions = np.zeros([self.num_classes] + list(data.shape[1:]), dtype=np.float32)
+
+        data = maybe_to_torch(data)
+        context = maybe_to_torch(context)
 
         for x in steps[0]:
             lb_x = x
