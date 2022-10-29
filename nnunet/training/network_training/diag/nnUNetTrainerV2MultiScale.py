@@ -631,7 +631,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         if run_online_evaluation:
             self.run_online_evaluation(output, target)
 
-        if self.plot_validation_results and not self.epoch % 10:
+        if not self.network.training and self.plot_validation_results and not self.epoch % 10:
             root_dir = join(self.output_folder, "debug_plots", str(self.epoch))
             maybe_mkdir_p(root_dir)
             kwargs = lambda batch_number: dict(
