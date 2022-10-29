@@ -17,10 +17,6 @@ from batchgenerators.dataloading.multi_threaded_augmenter import MultiThreadedAu
 from batchgenerators.transforms.abstract_transforms import Compose
 from batchgenerators.transforms.channel_selection_transforms import DataChannelSelectionTransform, \
     SegChannelSelectionTransform
-from batchgenerators.transforms.color_transforms import BrightnessTransform, BrightnessMultiplicativeTransform, \
-    ContrastAugmentationTransform
-from batchgenerators.transforms.color_transforms import GammaTransform
-from batchgenerators.transforms.noise_transforms import GaussianBlurTransform, GaussianNoiseTransform
 from batchgenerators.transforms.utility_transforms import RemoveLabelTransform, RenameTransform, NumpyToTensor
 
 from nnunet.training.data_augmentation.custom_transforms import Convert3DTo2DTransform, Convert2DTo3DTransform, \
@@ -109,11 +105,46 @@ class AlbuTranspose:
         return data_dict
 
 
+class AlbuMirror:
+
+    def __init__(self, data_key="data", seg_key="seg"):
+        self.data_key = data_key
+        self.seg_key = seg_key
+        self.aug = A.ReplayCompose([A.Flip(p=.5)])
+
+    def __call__(self, **data_dict):
+        data = data_dict.get(self.data_key)
+        seg = data_dict.get(self.seg_key)
+
+        for b in range(data.shape[0]):
+            if data[b].ndim == 4:
+                d = data[b].transpose(0, 2, 3, 1)
+                s = seg[b].transpose(1, 2, 0)
+                init = self.aug(d=np.random.choice([-1, 0, 1]), image=d[0], mask=s)
+                new_d = np.zeros_like(d)
+                new_d[0] = init['image']
+                s = init['mask'].transpose(2, 0, 1)
+                for i in range(1, d.shape[0]):
+                    new_d[i] = A.ReplayCompose.replay(init['replay'], image=d[i])['image']
+                d = new_d.transpose(0, 3, 1, 2)
+            else:
+                d = data[b].transpose(1, 2, 0)
+                s = seg[b].transpose(1, 2, 0)
+                augmented = self.aug(image=d, mask=s)
+                d = augmented['image'].transpose(2, 0, 1)
+                s = augmented['mask'].transpose(2, 0, 1)
+            data[b] = d
+            seg[b] = s
+        data_dict[self.data_key] = data
+        data_dict[self.seg_key] = seg
+        return data_dict
+
+
 class AlbuGaussianBlur:
 
     def __init__(self, data_key="data"):
         self.data_key = data_key
-        self.aug = A.ReplayCompose([A.GaussianBlur(p=1.0)])
+        self.aug = A.ReplayCompose([A.GaussianBlur((1, 3), p=1.0)])
 
     def __call__(self, **data_dict):
         data = data_dict.get(self.data_key)
@@ -163,7 +194,7 @@ class AlbuRandomBrightness:
 
     def __init__(self, data_key="data"):
         self.data_key = data_key
-        self.aug = A.ReplayCompose([A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0, p=1.0)])
+        self.aug = A.ReplayCompose([A.ColorJitter(brightness=0.1, contrast=0.05, saturation=0, p=1.0)])
 
     def __call__(self, **data_dict):
         data = data_dict.get(self.data_key)
