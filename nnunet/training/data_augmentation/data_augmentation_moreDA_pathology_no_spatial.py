@@ -41,26 +41,71 @@ except ImportError as ie:
 
 class AlbuRandomRotate90:
 
-    def __init__(self, data_key="data"):
+    def __init__(self, data_key="data", seg_key="seg"):
         self.data_key = data_key
+        self.seg_key = seg_key
         self.rotate = A.ReplayCompose([A.RandomRotate90(p=1.0)])
 
     def __call__(self, **data_dict):
         data = data_dict.get(self.data_key)
+        seg = data_dict.get(self.seg_key)
 
         for b in range(data.shape[0]):
             if data[b].ndim == 4:
                 d = data[b].transpose(0, 2, 3, 1)
-                init = self.rotate(image=d[0])
-                d = np.stack([init['image']] + [A.ReplayCompose.replay(init['replay'], image=d[i])['image'] for i in
-                                                range(1, d.shape[0])])
-                d = d.transpose(0, 3, 1, 2)
+                s = seg[b].transpose(1, 2, 0)
+                init = self.rotate(image=d[0], mask=s)
+                new_d = np.zeros_like(d)
+                new_d[0] = init['image']
+                s = init['mask'].transpose(2, 0, 1)
+                for i in range(1, d.shape[0]):
+                    new_d[i] = A.ReplayCompose.replay(init['replay'], image=d[i])['image']
+                d = new_d.transpose(0, 3, 1, 2)
             else:
                 d = data[b].transpose(1, 2, 0)
-                d = self.rotate(image=d)['image']
-                d = d.transpose(2, 0, 1)
+                s = seg[b].transpose(1, 2, 0)
+                augmented = self.rotate(image=d, mask=s)
+                d = augmented['image'].transpose(2, 0, 1)
+                s = augmented['mask'].transpose(2, 0, 1)
             data[b] = d
+            seg[b] = s
         data_dict[self.data_key] = data
+        data_dict[self.seg_key] = seg
+        return data_dict
+
+
+class AlbuTranspose:
+
+    def __init__(self, data_key="data", seg_key="seg"):
+        self.data_key = data_key
+        self.seg_key = seg_key
+        self.aug = A.ReplayCompose([A.Transpose(p=.5)])
+
+    def __call__(self, **data_dict):
+        data = data_dict.get(self.data_key)
+        seg = data_dict.get(self.seg_key)
+
+        for b in range(data.shape[0]):
+            if data[b].ndim == 4:
+                d = data[b].transpose(0, 2, 3, 1)
+                s = seg[b].transpose(1, 2, 0)
+                init = self.aug(image=d[0], mask=s)
+                new_d = np.zeros_like(d)
+                new_d[0] = init['image']
+                s = init['mask'].transpose(2, 0, 1)
+                for i in range(1, d.shape[0]):
+                    new_d[i] = A.ReplayCompose.replay(init['replay'], image=d[i])['image']
+                d = new_d.transpose(0, 3, 1, 2)
+            else:
+                d = data[b].transpose(1, 2, 0)
+                s = seg[b].transpose(1, 2, 0)
+                augmented = self.aug(image=d, mask=s)
+                d = augmented['image'].transpose(2, 0, 1)
+                s = augmented['mask'].transpose(2, 0, 1)
+            data[b] = d
+            seg[b] = s
+        data_dict[self.data_key] = data
+        data_dict[self.seg_key] = seg
         return data_dict
 
 
@@ -168,22 +213,18 @@ def get_moreDA_augmentation_pathology_no_spatial(dataloader_train, dataloader_va
     tr_transforms.append(AlbuGaussianBlur())
     tr_transforms.append(AlbuRandomBrightness())
     tr_transforms.append(AlbuRandomRotate90())
-    #
-    if params.get("do_additive_brightness"):
-        tr_transforms.append(BrightnessTransform(params.get("additive_brightness_mu"),
-                                                 params.get("additive_brightness_sigma"),
-                                                 True, p_per_sample=params.get("additive_brightness_p_per_sample"),
-                                                 p_per_channel=params.get("additive_brightness_p_per_channel")))
-    tr_transforms.append(ContrastAugmentationTransform(p_per_sample=0.15))
+    tr_transforms.append(AlbuTranspose())
+    # tr_transforms.append(ContrastAugmentationTransform(p_per_sample=0.15))
+
     if params.get("do_hed"):
         tr_transforms.append(HedTransform(**params["hed_params"]))
     if params.get("do_hsv"):
         tr_transforms.append(HsvTransform(**params["hsv_params"]))
 
-    if params.get("do_gamma"):
-        tr_transforms.append(
-            GammaTransform(params.get("gamma_range"), False, True, retain_stats=params.get("gamma_retain_stats"),
-                           p_per_sample=params["p_gamma"]))
+    # if params.get("do_gamma"):
+    #     tr_transforms.append(
+    #         GammaTransform(params.get("gamma_range"), False, True, retain_stats=params.get("gamma_retain_stats"),
+    #                        p_per_sample=params["p_gamma"]))
 
     if params.get("do_mirror") or params.get("mirror"):
         tr_transforms.append(MirrorTransform2D(params.get("mirror_axes")))

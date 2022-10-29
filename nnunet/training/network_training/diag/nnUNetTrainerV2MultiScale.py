@@ -203,9 +203,19 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             params=self.data_aug_params,
             deep_supervision_scales=self.deep_supervision_scales,
             pin_memory=self.pin_memory
+        ) if self.name_of_data_augs is not None else get_no_augmentation(
+            self.dl_tr, self.dl_val,
+            params=self.data_aug_params,
+            deep_supervision_scales=self.deep_supervision_scales,
+            pin_memory=self.pin_memory
         )
         _, self.val_gen_full_size = get_moreDA_augmentation_pathology_no_spatial(
             self.dl_tr, self.dl_val_full,
+            params=self.data_aug_params,
+            deep_supervision_scales=self.deep_supervision_scales,
+            pin_memory=self.pin_memory
+        ) if self.name_of_data_augs is not None else get_no_augmentation(
+            self.dl_tr, self.dl_val,
             params=self.data_aug_params,
             deep_supervision_scales=self.deep_supervision_scales,
             pin_memory=self.pin_memory
