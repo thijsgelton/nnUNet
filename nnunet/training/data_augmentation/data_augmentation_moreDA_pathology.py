@@ -13,7 +13,6 @@
 #    limitations under the License.
 
 from batchgenerators.dataloading.multi_threaded_augmenter import MultiThreadedAugmenter
-from batchgenerators.dataloading.single_threaded_augmenter import SingleThreadedAugmenter
 from batchgenerators.transforms.abstract_transforms import Compose
 from batchgenerators.transforms.channel_selection_transforms import DataChannelSelectionTransform, \
     SegChannelSelectionTransform
@@ -27,8 +26,8 @@ from batchgenerators.transforms.utility_transforms import RemoveLabelTransform, 
 
 from nnunet.training.data_augmentation.custom_transforms import Convert3DTo2DTransform, Convert2DTo3DTransform, \
     MaskTransform, ConvertSegmentationToRegionsTransform
-from nnunet.training.data_augmentation.diag.transforms.pathology_color_transforms import HedTransform, HsvTransform
 from nnunet.training.data_augmentation.default_data_augmentation import default_3D_augmentation_params
+from nnunet.training.data_augmentation.diag.transforms.pathology_color_transforms import HedTransform, HsvTransform
 from nnunet.training.data_augmentation.downsampling import DownsampleSegForDSTransform3, DownsampleSegForDSTransform2
 from nnunet.training.data_augmentation.pyramid_augmentations import MoveSegAsOneHotToData, \
     ApplyRandomBinaryOperatorTransform, \

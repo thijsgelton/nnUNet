@@ -11,6 +11,7 @@
 #    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
+import os
 from typing import Union, Tuple
 
 import matplotlib.pyplot as plt
@@ -19,6 +20,7 @@ import numpy as np
 import torch
 import torch.nn.functional
 from batchgenerators.augmentations.utils import pad_nd_image
+from matplotlib.colors import ListedColormap, BoundaryNorm
 from torch import nn
 from torch.cuda.amp import autocast
 from torchvision.transforms.functional import center_crop
@@ -147,6 +149,11 @@ class GenericUNetMultiScale(Generic_UNet):
                                            mult: Union[np.ndarray, torch.tensor] = None) -> torch.tensor:
         assert len(x.shape) == 5, 'x must be (b, modality, c, x, y)'
 
+        color_values = ['yellow', 'firebrick', 'pink', 'purple', "red", "green", "blue", "white", "white"]
+        cmap = ListedColormap(color_values)
+        bounds = list(range(len(color_values)))
+        norm = BoundaryNorm(bounds, cmap.N, clip=True)
+
         x = maybe_to_torch(x)
         result_torch = torch.zeros([x.shape[0], self.num_classes] + list(x.shape[3:]), dtype=torch.float)
 
@@ -165,26 +172,52 @@ class GenericUNetMultiScale(Generic_UNet):
         else:
             mirror_idx = 1
             num_results = 1
+
+        # fig, axs = plt.subplots(5, 3, figsize=(15, 25))
         for m in range(mirror_idx):
             if m == 0:
                 pred = self.inference_apply_nonlin(self(x)[0])
+                # axs[0][0].imshow(x[0][0].detach().cpu().numpy().transpose(1, 2, 0))
+                # axs[0][1].imshow(pred.detach().cpu().numpy()[0].argmax(axis=0), cmap=cmap, norm=norm,
+                #                  interpolation='nearest')
+                # axs[0][2].imshow(x[0][1].detach().cpu().numpy().transpose(1, 2, 0))
                 result_torch += 1 / num_results * pred
 
             if m == 1 and (1 in mirror_axes):
                 pred = self.inference_apply_nonlin(self(torch.flip(x, (4,)))[0])
+                # axs[1][0].imshow(torch.flip(x, (4,))[0][0].detach().cpu().numpy().transpose(1, 2, 0))
+                # axs[1][1].imshow(pred.detach().cpu().numpy()[0].argmax(axis=0), cmap=cmap, norm=norm,
+                #                  interpolation='nearest')
+                # axs[1][2].imshow(torch.flip(x, (4,))[0][1].detach().cpu().numpy().transpose(1, 2, 0))
                 result_torch += 1 / num_results * torch.flip(pred, (3,))
 
-                if m == 2 and (0 in mirror_axes):
-                    pred = self.inference_apply_nonlin(self(torch.flip(x, (3,)))[0])
+            if m == 2 and (0 in mirror_axes):
+                pred = self.inference_apply_nonlin(self(torch.flip(x, (3,)))[0])
+                # axs[2][0].imshow(torch.flip(x, (3,))[0][0].detach().cpu().numpy().transpose(1, 2, 0))
+                # axs[2][1].imshow(pred.detach().cpu().numpy()[0].argmax(axis=0), cmap=cmap, norm=norm,
+                #                  interpolation='nearest')
+                # axs[2][2].imshow(torch.flip(x, (3,))[0][1].detach().cpu().numpy().transpose(1, 2, 0))
                 result_torch += 1 / num_results * torch.flip(pred, (2,))
 
-                if m == 3 and (0 in mirror_axes) and (1 in mirror_axes):
-                    pred = self.inference_apply_nonlin(self(torch.flip(x, (4, 3)))[0])
+            if m == 3 and (0 in mirror_axes) and (1 in mirror_axes):
+                pred = self.inference_apply_nonlin(self(torch.flip(x, (4, 3)))[0])
+                # axs[3][0].imshow(torch.flip(x, (4, 3))[0][0].detach().cpu().numpy().transpose(1, 2, 0))
+                # axs[3][1].imshow(pred.detach().cpu().numpy()[0].argmax(axis=0), cmap=cmap, norm=norm,
+                #                  interpolation='nearest')
+                # axs[3][2].imshow(torch.flip(x, (4, 3))[0][1].detach().cpu().numpy().transpose(1, 2, 0))
                 result_torch += 1 / num_results * torch.flip(pred, (3, 2))
 
-                if mult is not None:
-                    result_torch[:, :] *= mult
-
+            if mult is not None:
+                result_torch[:, :] *= mult
+        #
+        # axs[4][0].imshow(x[0][0].detach().cpu().numpy().transpose(1, 2, 0))
+        # axs[4][1].imshow(result_torch.detach().cpu().numpy()[0].argmax(axis=0), cmap=cmap, norm=norm,
+        #                  interpolation='nearest')
+        # axs[4][2].imshow(torch.flip(x, (4, 3))[0][1].detach().cpu().numpy().transpose(1, 2, 0))
+        # plt.tight_layout()
+        # plt.savefig(os.path.join(os.environ['RESULTS_FOLDER'], f"{self.counter}.png"))
+        # plt.close()
+        # self.counter += 1
         return result_torch
 
     def _internal_predict_2D_2Dconv_tiled(self, x: np.ndarray, step_size: float, do_mirroring: bool, mirror_axes: tuple,
