@@ -41,7 +41,7 @@ from nnunet.training.dataloading.diag.dataset_loading_insideroi_multiscale impor
     DataLoader2DROIsMultiScaleFilename
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
-from nnunet.training.loss_functions.dice_loss import DC_and_CE_loss
+from nnunet.training.loss_functions.dice_loss import DC_and_CE_loss, DiceFocalLoss
 from nnunet.training.network_training.nnUNetTrainer import nnUNetTrainer
 from nnunet.training.network_training.nnUNetTrainerV2 import nnUNetTrainerV2
 from nnunet.utilities import shutil_sol
@@ -62,9 +62,10 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                  coordinates_in_filename=False, debug_plot_color_values=None, do_bg=False, pin_memory=True,
                  norm_op="instance", data_identifier=None, loss_class_weights=None, metric_class_weights=None,
                  use_jaccard=False, context_label_problem="multi_label", context_file_extension="svs",
-                 name_of_data_augs="no_spatial"):
+                 name_of_data_augs="no_spatial", loss_func='dice_and_ce'):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
+        self.loss_func = loss_func
         self.context_file_extension = context_file_extension
         self.context_label_problem = context_label_problem
         self.metric_class_weights = None
@@ -104,8 +105,11 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.do_ds = deepsupervision
         self.use_context = use_context
         self.name_of_data_augs = name_of_data_augs
-        self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg},
-                                   {}, class_weights=loss_class_weights)
+        if self.loss_func == 'dice_and_ce':
+            self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg},
+                                       {}, class_weights=loss_class_weights)
+        else:
+            self.loss = DiceFocalLoss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg})
         if self.use_context_loss:
             if self.key_to_class:
                 self.context_loss = nn.CrossEntropyLoss()
