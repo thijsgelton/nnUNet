@@ -161,7 +161,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             self.folder_with_preprocessed_data = join(self.dataset_directory,
                                                       (self.data_identifier or self.plans['data_identifier']) +
                                                       "_stage%d" % self.stage)
-            self.prepare_data()
+            if training:
+                self.prepare_data()
 
             self.initialize_network()
             self.initialize_optimizer_and_scheduler()
@@ -373,11 +374,10 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         """
         if debug=True then the temporary files generated for postprocessing determination will be kept
         """
-
         current_mode = self.network.training
         self.network.eval()
 
-        if not self.val_gen:
+        if not self.val_gen_full_size:
             self.prepare_data()
 
         assert self.was_initialized, "must initialize, ideally with checkpoint (or train first)"
