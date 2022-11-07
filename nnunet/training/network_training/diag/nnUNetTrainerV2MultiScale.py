@@ -161,10 +161,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             self.folder_with_preprocessed_data = join(self.dataset_directory,
                                                       (self.data_identifier or self.plans['data_identifier']) +
                                                       "_stage%d" % self.stage)
-            if training:
-                self.prepare_data()
-            else:
-                pass
+            self.prepare_data()
 
             self.initialize_network()
             self.initialize_optimizer_and_scheduler()
@@ -215,11 +212,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         )
         _, self.val_gen_full_size = get_moreDA_augmentation_pathology_no_spatial(
             self.dl_tr, self.dl_val_full,
-            params=self.data_aug_params,
-            deep_supervision_scales=self.deep_supervision_scales,
-            pin_memory=self.pin_memory
-        ) if self.name_of_data_augs is not None else get_no_augmentation(
-            self.dl_tr, self.dl_val,
             params=self.data_aug_params,
             deep_supervision_scales=self.deep_supervision_scales,
             pin_memory=self.pin_memory

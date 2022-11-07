@@ -52,7 +52,8 @@ def main():
     parser.add_argument('-m', '--model', help="2d, 3d_lowres, 3d_fullres or 3d_cascade_fullres. Default: 3d_fullres",
                         default="3d_fullres", required=False)
 
-    parser.add_argument('-p', '--plans_identifier', help='do not touch this unless you know what you are doing',
+    parser.add_argument('-p', '--plans_identifier', '--plans',
+                        help='do not touch this unless you know what you are doing',
                         default=default_plans_identifier, required=False)
 
     parser.add_argument('-f', '--folds', nargs='+', default='None',
