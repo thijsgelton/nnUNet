@@ -11,10 +11,7 @@
 #    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
-import os
 from typing import Union, Tuple
-
-import matplotlib.pyplot as plt
 
 import numpy as np
 import torch
@@ -44,9 +41,11 @@ class GenericUNetMultiScale(Generic_UNet):
         """
         First version that uses a CNN to encode context around the main patch. Assuming that the following formula holds:
         Encoder contains 5 downsamplings and the input patch is at 8.0 mpp. This results in 2**3 * 2**5 = 2**8 mpp patch
-         of 16x16xFM (this depends on resnet18/50). nnUNet will be fixed at 7 poolings to allow for the encoder in VRAM.
-         With 7 poolings the input of 0.5 mpp will be 2**-1 * 2**7 = 2**6 mpp. To braze the gap the encoded patch will be
-         cropped by 2**2 = 2**(8-6).
+        of 16x16xFM (this depends on resnet18/50). nnUNet will be fixed at 7 poolings to allow for the encoder in VRAM.
+        With 7 poolings the input of 0.5 mpp will be 2**-1 * 2**7 = 2**6 mpp. To braze the gap the encoded patch will be
+        cropped by 2**2 = 2**(8-6).
+
+        NOTE: most of the code is by nnU-Net with only slide adaptations to allow for a context patch.
         """
         super(GenericUNetMultiScale, self).__init__(*args, **kwargs)
         self.context_num_classes = context_num_classes
@@ -68,6 +67,8 @@ class GenericUNetMultiScale(Generic_UNet):
         target_ds = np.log2(input_dim) - np.log2(self.w_t)
         spatial_difference = np.log2(self.w_e) - np.log2(self.w_t)
         resolutional_difference = (np.log2(ct_spacing) + context_ds) - (np.log2(tg_spacing) + target_ds)
+        # Computes the required amount of down samplings w.r.t. the context encoder
+        # in order to align target and context patch, before  interpolating to the target patch size
         self.ds_difference = int(resolutional_difference) + int(spatial_difference)
         self.upsample = Upsample(scale_factor=2 ** self.ds_difference, mode="bicubic")
         self.reduce_fm_conv = StackedConvLayers(c_t + c_e, c_t, 1,
@@ -87,16 +88,11 @@ class GenericUNetMultiScale(Generic_UNet):
         del b_t, c_t, b_e, c_e, self.w_t, self.h_t, self.w_e, self.h_e
 
     def forward(self, x):
+        """
+        :param x: shape should be (batch number, target + context, channels, width, height)
+        """
         main = x[:, 0]
         context = x[:, 1]
-        #
-        # fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-        # axs[0].imshow(main[0].detach().cpu().numpy().transpose(1, 2, 0))
-        # axs[1].imshow(context[0].detach().cpu().numpy().transpose(1, 2, 0))
-        # plt.savefig(
-        #     f"/data/pathology/projects/pathology-endoaid/phase 3 - nnUNet/nnUNet_raw_data_base_6cl_revised/test_{self.counter}.png")
-        # self.counter += 1
-        # plt.close()
 
         skips = []
         seg_outputs = []
@@ -108,7 +104,7 @@ class GenericUNetMultiScale(Generic_UNet):
 
         main_encoding = self.conv_blocks_context[-1](main)
         if self.use_context:
-            context_encoding = self.context_encoder(context)  # 512, 16x16
+            context_encoding = self.context_encoder(context)
 
             w, h = context_encoding.shape[-2:]
 

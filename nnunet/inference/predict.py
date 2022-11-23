@@ -14,9 +14,7 @@
 
 
 import argparse
-import sys
 from copy import deepcopy
-from glob import glob
 from multiprocessing import Pool
 from multiprocessing import Process, Queue
 from pathlib import Path
@@ -27,8 +25,6 @@ import numpy as np
 import torch
 from batchgenerators.augmentations.utils import resize_segmentation
 from batchgenerators.utilities.file_and_folder_operations import *
-from wholeslidedata import WholeSlideAnnotation, WholeSlideImage
-from wholeslidedata.accessories.asap.parser import AsapAnnotationParser
 
 import nnunet.utilities.shutil_sol as shutil_sol
 from nnunet.inference.segmentation_export import save_segmentation_nifti_from_softmax, save_segmentation_nifti
@@ -224,8 +220,7 @@ def predict_cases(model, list_of_lists, output_filenames, folds, save_npz, num_t
 
         if isinstance(trainer, nnUNetTrainerV2MultiScale):
             roi_name = Path(output_filename).stem.strip(".nii")
-            context = sample_context(dict(), key=roi_name, data_origin=trainer_kwargs['data_origin'],
-                                     spacing=trainer_kwargs['spacing'], shape=d.shape[-2:])
+            context = trainer.dl_tr.sample_context(dict(), key=roi_name, shape=d.shape[-2:])
             d = np.stack([d[:, 0], context])
 
         print("predicting", output_filename)
@@ -465,19 +460,6 @@ def predict_cases_fast(model, list_of_lists, output_filenames, folds, num_thread
 
     pool.close()
     pool.join()
-
-
-def sample_context(props, key, data_origin, spacing, shape=None):
-    parser = AsapAnnotationParser(labels={'none': 0}, sample_label_names=['none'])
-    anno_number = int(key.split("_")[-1].strip("ROI"))
-    file_identifier = os.path.join(data_origin, '_'.join(key.split('_')[:-1]))
-    wsa = WholeSlideAnnotation(glob(f"{file_identifier}.xml")[0], parser=parser)
-    wsi = WholeSlideImage(glob(f"{file_identifier}.tif")[0], backend='asap')
-    anno = wsa.sampling_annotations[anno_number]
-    x, y = anno.center
-    x += props.get("offset_x", 0)
-    y += props.get("offset_y", 0)
-    return wsi.get_patch(x, y, *shape[::-1], spacing=spacing).transpose(2, 0, 1) / 255.
 
 
 def predict_cases_fastest(model, list_of_lists, output_filenames, folds, num_threads_preprocessing,

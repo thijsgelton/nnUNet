@@ -47,4 +47,6 @@ if __name__ == "__main__":
     # args = parser.parse_args()
     # if not os.path.exists(args.output_directory):
     #     Path(args.output_directory).mkdir(parents=True, exist_ok=True)
-    copytree("/data/pathology/projects/pathology-endoaid/phase 3 - nnUNet/nnUNet_raw_data_base/nnUNet_preprocessed/Task601_paip2019", "/home/user/data/nnUNet_preprocessed/Task601_paip2019")
+    copytree(
+        "/data/pathology/projects/pathology-endoaid/phase 3 - nnUNet/nnUNet_raw_data_base_6cl_revised/nnUNet_preprocessed/Task501_endometrium_carcinoma_segmentation",
+        "/home/user/data/nnUNet_preprocessed/Task501_endometrium_carcinoma_segmentation")

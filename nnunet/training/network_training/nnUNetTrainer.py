@@ -13,12 +13,10 @@
 #    limitations under the License.
 
 
-import shutil
-import nnunet.utilities.shutil_sol as shutil_sol
 from collections import OrderedDict
 from multiprocessing import Pool
 from time import sleep
-from typing import Tuple, List
+from typing import Tuple
 
 import matplotlib
 import numpy as np
@@ -28,6 +26,7 @@ from torch import nn
 from torch.optim import lr_scheduler
 
 import nnunet
+import nnunet.utilities.shutil_sol as shutil_sol
 from nnunet.configuration import default_num_threads
 from nnunet.evaluation.evaluator import aggregate_scores
 from nnunet.inference.segmentation_export import save_segmentation_nifti_from_softmax
@@ -48,8 +47,7 @@ matplotlib.use("agg")
 
 class nnUNetTrainer(NetworkTrainer):
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
-                 unpack_data=True, deterministic=True, fp16=False,
-                 save_segmentation_method=save_segmentation_nifti_from_softmax):
+                 unpack_data=True, deterministic=True, fp16=False):
         """
         :param deterministic:
         :param fold: can be either [0 ... 5) for cross-validation, 'all' to train on all available training data or

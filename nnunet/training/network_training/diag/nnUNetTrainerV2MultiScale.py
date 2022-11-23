@@ -20,7 +20,6 @@ import torch
 import wandb
 from batchgenerators.utilities.file_and_folder_operations import *
 from mtdp import build_model
-from scipy.stats import zscore
 from torch import nn
 from torch.cuda.amp import autocast
 
@@ -37,11 +36,11 @@ from nnunet.training.data_augmentation.data_augmentation_noDA import get_no_augm
 from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params, \
     default_3D_augmentation_params, get_patch_size
 from nnunet.training.dataloading.dataset_loading import unpack_dataset
-from nnunet.training.dataloading.diag.dataset_loading_insideroi_multiscale import DataLoader2DROIsMultiScale, \
-    DataLoader2DROIsMultiScaleFilename
+from nnunet.training.dataloading.diag.dataset_loading_insideroi_multiscale import DataLoader2DROIsMultiScaleFileName, \
+    DataLoader2DROIsMultiScaleCoordinatesFilename
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
-from nnunet.training.loss_functions.dice_loss import DC_and_CE_loss, DiceFocalLoss
+from nnunet.training.loss_functions.dice_loss import DC_and_CE_loss
 from nnunet.training.network_training.nnUNetTrainer import nnUNetTrainer
 from nnunet.training.network_training.nnUNetTrainerV2 import nnUNetTrainerV2
 from nnunet.utilities import shutil_sol
@@ -51,69 +50,87 @@ from nnunet.utilities.to_torch import maybe_to_torch, to_cuda
 
 class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
     """
-    Info for Fabian: same as internal nnUNetTrainerV2_2
+    Trainer that uses generic unet with an extra CNN to encode a patch at lower resolution, such that it regularizes
+    the model in the class switching phenomenon.
     """
 
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
                  unpack_data=True, deterministic=True, fp16=False, data_origin=None, labels_dict=None, spacing=8.0,
                  target_spacing=0.5, encoder_kwargs=None, convolutional_pooling=True, deepsupervision=True,
-                 mapping_key_to_class_json_file=None, context_num_classes=None, use_context=True, max_num_epochs=1000,
+                 context_num_classes=None, use_context=True, max_num_epochs=1000,
                  plot_validation_results=False, initial_lr=1e-2, initial_lr_context=1e-5,
                  coordinates_in_filename=False, debug_plot_color_values=None, do_bg=False, pin_memory=True,
                  norm_op="instance", data_identifier=None, loss_class_weights=None, metric_class_weights=None,
-                 use_jaccard=False, context_label_problem="multi_label", context_file_extension="svs",
-                 name_of_data_augs="no_spatial", loss_func='dice_and_ce'):
+                 use_jaccard=False, context_label_problem="multi_label", context_file_extension="tif",
+                 name_of_data_augs="no_spatial"):
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
-        self.loss_func = loss_func
+        # Loading the context patch.
         self.context_file_extension = context_file_extension
+        # Options: multi_label / regression (requires: use_context_loss = True)
         self.context_label_problem = context_label_problem
+        # Weights to weight jaccard or dice metric
         self.metric_class_weights = None
         if metric_class_weights is not None:
             self.metric_class_indices = np.where(np.array(metric_class_weights) > 0)[0]
             self.metric_class_weights = (np.array(metric_class_weights) if np.array(
                 metric_class_weights).sum() == 1 else np.array(metric_class_weights) / np.array(
                 metric_class_weights).sum())[self.metric_class_indices]
+        # If this is False, use dice
         self.use_jaccard = use_jaccard
+        # Specific to nnU-Net. Specify name of preprocessed data folder.
         self.data_identifier = data_identifier
+        # If not 'instance', use batch norm
         self.norm_op = norm_op
+        # Comma separated string where each value is a colour of matplotlib, e.g. 'white,blue,red,green,yellow' for a 4
+        # class problem. White is then for background.
         self.debug_plot_color_values = debug_plot_color_values
+        # If coordinates_in_filename = True, then the filename must be formatted as
+        # SOMETHING_x_{x coordinate}_y_{y coordinate}.<context_file_extension>
         self.coordinates_in_filename = coordinates_in_filename
+        # Whether you want to plot the networks predictions every 10 epochs in a separte folder
         self.plot_validation_results = plot_validation_results
+        # If set, the network will produce N = context_num_classes logits that can be used to compute a loss
         self.context_num_classes = context_num_classes
-        self.mapping_key_to_class_json_file = mapping_key_to_class_json_file
         self.use_context_loss = context_num_classes is not None
+        # If set to true, uses convolutions to down sample instead of max pooling
         self.convolutional_pooling = convolutional_pooling
+        # microns per pixel for the context patch (e.g., 2.0, 4.0 or 8.0)
         self.spacing = spacing
+        # microns per pixel for the target patch (e.g., 0.25, 0.5)
         self.target_spacing = target_spacing
-        self.labels_dict = labels_dict
+        # The directory with the whole slide images, to sample the context from
         self.data_origin = data_origin
+        # Save checkpoints every 5 epochs
         self.save_every = 5
+        # Example of encoders kwargs: {"arch":"resnet18","pretrained":false,"trainable":True}
+        # Arch options: resnet18, resnet50
+        # Pretrained options: imagenet, mtdp or False
+        # Trainable options: True, False
+        # See https://github.com/waliens/multitask-dipath for more details
         if encoder_kwargs is None:
             print("Since encoder_kwargs is empty, we will use the default: resnet18 with imagenet weights.")
             encoder_kwargs = {"arch": "resnet18", "pretrained": "imagenet"}
         self.encoder_kwargs = encoder_kwargs
         self.max_num_epochs = max_num_epochs
+        # Separate learning rates for the target and context branch
         self.initial_lr = initial_lr
         self.initial_lr_context = initial_lr_context
+        # Will be set later at self.initialize()
         self.encoder = None
         self.ds_loss_weights, self.deep_supervision_scales = None, None
-        self.key_to_class = None
         self.pin_memory = pin_memory
         self.dl_val_full = None
         self.train_context_losses, self.train_target_losses, self.val_context_losses, self.val_target_losses = [[]] * 4
         self.do_ds = deepsupervision
+        # Whether to use context at all in the GenericUNetMultiScale. Used for debug purposes.
         self.use_context = use_context
+        # Options: 'no_spatial', 'all' or None
         self.name_of_data_augs = name_of_data_augs
-        if self.loss_func == 'dice_and_ce':
-            self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg},
-                                       {}, class_weights=loss_class_weights)
-        else:
-            self.loss = DiceFocalLoss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg})
+        self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': do_bg},
+                                   {}, class_weights=loss_class_weights)
         if self.use_context_loss:
-            if self.key_to_class:
-                self.context_loss = nn.CrossEntropyLoss()
-            elif self.context_label_problem == 'multi_label':
+            if self.context_label_problem == 'multi_label':
                 self.context_loss = nn.BCEWithLogitsLoss()
             elif self.context_label_problem == 'regression':
                 self.context_loss = nn.L1Loss()
@@ -147,11 +164,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                 self.setup_DA_params_with_spatial()
             else:
                 self.setup_no_DA_params()
-
-            if self.use_context_loss and self.mapping_key_to_class_json_file:
-                with open(self.mapping_key_to_class_json_file, "r") as jason:
-                    self.key_to_class = {k: torch.tensor(v, dtype=torch.float16 if self.fp16 else torch.float32) for
-                                         k, v in json.load(jason).items()}
 
             if self.do_ds:
                 self.wrap_loss_for_deep_supervision()
@@ -188,9 +200,9 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
     def prepare_data(self):
         if self.coordinates_in_filename:
-            self.dl_tr, self.dl_val, self.dl_val_full = self.get_basic_generators_filename()
+            self.dl_tr, self.dl_val, self.dl_val_full = self.get_basic_generators_coordinates_filename()
         else:
-            self.dl_tr, self.dl_val, self.dl_val_full = self.get_basic_generators()
+            self.dl_tr, self.dl_val, self.dl_val_full = self.get_basic_generators_filename()
         if self.unpack_data:
             print("unpacking dataset")
             unpack_dataset(self.folder_with_preprocessed_data)
@@ -222,10 +234,10 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.print_to_log_file("VALIDATION KEYS:\n %s" % (str(self.dataset_val.keys())),
                                also_print_to_console=False)
 
-    def get_basic_generators(self):
+    def get_basic_generators_filename(self):
         self.load_dataset()
         self.do_split()
-        dl_tr = DataLoader2DROIsMultiScale(
+        dl_tr = DataLoader2DROIsMultiScaleFileName(
             data_origin=self.data_origin,
             spacing=self.spacing,
             data=self.dataset_tr,
@@ -235,11 +247,11 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             oversample_foreground_percent=self.oversample_foreground_percent,
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
-            key_to_class=self.key_to_class,
             memmap_mode='r+',
+            context_file_extension=self.context_file_extension,
             context_label_problem=self.context_label_problem
         )
-        dl_val = DataLoader2DROIsMultiScale(
+        dl_val = DataLoader2DROIsMultiScaleFileName(
             data_origin=self.data_origin,
             spacing=self.spacing,
             data=self.dataset_val,
@@ -251,11 +263,11 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_sides=self.pad_all_sides,
             memmap_mode='r+',
             training=True,
-            key_to_class=self.key_to_class,
             crop_to_patch_size=True,
+            context_file_extension=self.context_file_extension,
             context_label_problem=self.context_label_problem
         )
-        dl_val_full = DataLoader2DROIsMultiScale(
+        dl_val_full = DataLoader2DROIsMultiScaleFileName(
             data_origin=self.data_origin,
             spacing=self.spacing,
             data=self.dataset_val,
@@ -267,15 +279,16 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_sides=self.pad_all_sides,
             memmap_mode='r+',
             training=False,
+            context_file_extension=self.context_file_extension,
             crop_to_patch_size=False
         )
 
         return dl_tr, dl_val, dl_val_full
 
-    def get_basic_generators_filename(self):
+    def get_basic_generators_coordinates_filename(self):
         self.load_dataset()
         self.do_split()
-        dl_tr = DataLoader2DROIsMultiScaleFilename(
+        dl_tr = DataLoader2DROIsMultiScaleCoordinatesFilename(
             data_origin=self.data_origin,
             spacing=self.spacing,
             data=self.dataset_tr,
@@ -285,12 +298,11 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             oversample_foreground_percent=self.oversample_foreground_percent,
             pad_mode="constant",
             pad_sides=self.pad_all_sides,
-            key_to_class=self.key_to_class,
             memmap_mode='r+',
             context_label_problem=self.context_label_problem,
             context_file_extension=self.context_file_extension
         )
-        dl_val = DataLoader2DROIsMultiScaleFilename(
+        dl_val = DataLoader2DROIsMultiScaleCoordinatesFilename(
             data_origin=self.data_origin,
             spacing=self.spacing,
             data=self.dataset_val,
@@ -302,12 +314,11 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
             pad_sides=self.pad_all_sides,
             memmap_mode='r+',
             training=True,
-            key_to_class=self.key_to_class,
             crop_to_patch_size=True,
             context_label_problem=self.context_label_problem,
             context_file_extension=self.context_file_extension
         )
-        dl_val_full = DataLoader2DROIsMultiScaleFilename(
+        dl_val_full = DataLoader2DROIsMultiScaleCoordinatesFilename(
             data_origin=self.data_origin,
             spacing=self.spacing,
             data=self.dataset_val,
@@ -359,6 +370,9 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.network.inference_apply_nonlin = softmax_helper
 
     def initialize_optimizer_and_scheduler(self):
+        """
+        Use separate learning rates for the context encoder's parameters and the original nnU-Net.
+        """
         assert self.network is not None, "self.initialize_network must be called first"
         self.optimizer = torch.optim.SGD(
             [{'params': [param for (name, param) in self.network.named_parameters() if 'context_encoder' not in name]},
@@ -538,19 +552,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
                                                          pad_kwargs: dict = None, all_in_gpu: bool = False,
                                                          verbose: bool = True, mixed_precision: bool = True) -> Tuple[
         np.ndarray, np.ndarray]:
-        """
-        :param data:
-        :param do_mirroring:
-        :param mirror_axes:
-        :param use_sliding_window:
-        :param step_size:
-        :param use_gaussian:
-        :param pad_border_mode:
-        :param pad_kwargs:
-        :param all_in_gpu:
-        :param verbose:
-        :return:
-        """
         if pad_border_mode == 'constant' and pad_kwargs is None:
             pad_kwargs = {'constant_values': 0}
 
@@ -580,12 +581,8 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
     def run_iteration(self, data_generator, do_backprop=True, run_online_evaluation=False):
         """
-        gradient clipping improves training stability
-
-        :param data_generator:
-        :param do_backprop:
-        :param run_online_evaluation:
-        :return:
+        Gradient clipping improves training stability. Method is extended to also plot the validation steps each 10
+         epochs. This helps to visualize the state of the network.
         """
         data_dict = next(data_generator)
         data = data_dict['data']
@@ -655,6 +652,9 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         return loss.detach().cpu().numpy()
 
     def apply_network(self, context_target, data, target):
+        """
+        Computes the output and loss and if required a loss for the context branch.
+        """
         output, context_logits = self.network(data)
         loss = self.loss(output, target)
         if not self.network.training:
@@ -674,9 +674,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         """
         due to deep supervision the return value and the reference are now lists of tensors. We only need the full
         resolution output because this is what we are interested in the end. The others are ignored
-        :param output:
-        :param target:
-        :return:
         """
         if self.do_ds:
             target = target[0]
@@ -711,8 +708,7 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
 
     def setup_no_DA_params(self):
         """
-        Specific to multiscale. No spatial translations that can misalign the target and context patches. So, flips
-        are allowed and colour transformations.
+        No data augmentations. Everything turned off.
         """
         if self.do_ds:
             self.deep_supervision_scales = [[1, 1, 1]] + list(list(i) for i in 1 / np.cumprod(
@@ -740,8 +736,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         - we increase roation angle from [-15, 15] to [-30, 30]
         - scale range is now (0.7, 1.4), was (0.85, 1.25)
         - we don't do elastic deformation anymore
-
-        :return:
         """
 
         self.deep_supervision_scales = [[1, 1, 1]] + list(list(i) for i in 1 / np.cumprod(
@@ -811,7 +805,6 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         continued epoch with self.initial_lr
 
         we also need to make sure deep supervision in the network is enabled for training, thus the wrapper
-        :return:
         """
         config = self.get_debug_information()
         wandb.init(project=os.environ.get("WANDB_PROJECT"), config=config)
@@ -824,37 +817,14 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         self.network.do_ds = ds
         return ret
 
-    @staticmethod
-    def z_score_norm(array: np.ndarray):
-        return zscore(array.reshape(-1, 3)).reshape(array.shape)
-
     def plot_network_architecture(self):
-        import traceback
-        try:
-            from batchgenerators.utilities.file_and_folder_operations import join
-            import hiddenlayer as hl
-            if torch.cuda.is_available():
-                g = hl.build_graph(self.network, torch.rand((1, 2, self.num_input_channels, *self.patch_size)).cuda(),
-                                   transforms=None)
-            else:
-                g = hl.build_graph(self.network, torch.rand((1, 2, self.num_input_channels, *self.patch_size)),
-                                   transforms=None)
-            g.save(join(self.output_folder, "network_architecture.pdf"))
-            del g
-        except Exception as e:
-            self.print_to_log_file("Unable to plot network architecture:")
-            self.print_to_log_file(e)
-            self.print_to_log_file(traceback.format_exc())
-
-            self.print_to_log_file("\nprinting the network instead:\n")
-            self.print_to_log_file(self.network)
-            self.print_to_log_file("\n")
-        finally:
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+        """
+        This method does not work in this trainer due to the fact that the network uses center cropping and this
+        can not be plotted.
+        """
+        pass
 
     def on_epoch_end(self):
-
         """
         overwrite patient-based early stopping. Always run to 1000 epochs
         :return:
@@ -864,6 +834,14 @@ class nnUNetTrainerV2MultiScale(nnUNetTrainerV2):
         return continue_training
 
     def log_to_wandb(self):
+        """
+        To monitor the experiments, you can use wandb. To use this you will need to set the following environment
+        variables:
+        WANDB_API_KEY=<can be found on project page>;
+        WANDB_MODE=<online/offline (not synced to wandb)/disabled (wandb logging turned off)>;
+        WANDB_NAME=<name-of-run>
+        WANDB_PROJECT=<name-of-project>
+        """
         log = {
             "train/loss": self.all_tr_losses[-1],
             "val/loss": self.all_val_losses[-1],

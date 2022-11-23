@@ -23,6 +23,11 @@ import numpy as np
 
 
 class ExperimentPlanner2D_v21_MultiScale(ExperimentPlanner2D):
+    """
+    Experiment planner where during architecture configuration it will take into account the amount of VRAM for the
+    encoder and additionally you can fixate patch size and number of pooling operations.
+    """
+
     def __init__(self, folder_with_cropped_data, preprocessed_output_folder, vram_encoder=154257408,
                  force_patch_size=None, force_num_pools=None,
                  data_identifier="nnUNetData_plans_v2.1_MultiScale_plans_2D",
