@@ -122,3 +122,5 @@ ENV/
 !/tests/resources/pretrained/*.md5
 !/tests/resources/results/**/*.nii.gz
 !/tests/resources/license.txt
+notebooks/
+notebooks/*.ipynb
