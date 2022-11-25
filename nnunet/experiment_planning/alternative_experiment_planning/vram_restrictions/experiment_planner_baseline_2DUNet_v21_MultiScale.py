@@ -13,19 +13,21 @@
 #    limitations under the License.
 from copy import deepcopy
 
-import timm as timm
+import numpy as np
 
 from nnunet.experiment_planning.common_utils import get_pool_and_conv_props
 from nnunet.experiment_planning.experiment_planner_baseline_2DUNet import ExperimentPlanner2D
 from nnunet.network_architecture.generic_UNet import Generic_UNet
 from nnunet.paths import *
-import numpy as np
 
 
 class ExperimentPlanner2D_v21_MultiScale(ExperimentPlanner2D):
     """
     Experiment planner where during architecture configuration it will take into account the amount of VRAM for the
-    encoder and additionally you can fixate patch size and number of pooling operations.
+    encoder, and additionally you can fixate patch size and number of pooling operations. The amount of VRAM for the
+    encoder should be supplied as parameter instead of computing, since this is different for most operating systems.
+    For the resnet18 we computed it to be approximately 154257408 and for the resnet50 304257408. As with
+    Generic_UNet.compute_approx_vram_consumption, the number is not the actual VRAM, but it is proportional to the VRAM.
     """
 
     def __init__(self, folder_with_cropped_data, preprocessed_output_folder, vram_encoder=154257408,
