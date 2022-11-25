@@ -221,6 +221,10 @@ def get_moreDA_augmentation_pathology_no_spatial(dataloader_train, dataloader_va
                                                  soft_ds=False,
                                                  classes=None, pin_memory=True, regions=None,
                                                  use_nondetMultiThreadedAugmenter: bool = False):
+    """
+    Removed all transformations that cause misalignment of the target and context patch.
+    """
+
     assert params.get('mirror') is None, "old version of params, use new keyword do_mirror"
 
     tr_transforms = []
@@ -238,24 +242,15 @@ def get_moreDA_augmentation_pathology_no_spatial(dataloader_train, dataloader_va
     if params.get("dummy_2D"):
         tr_transforms.append(Convert2DTo3DTransform())
 
-    # we need to put the color augmentations after the dummy 2d part (if applicable). Otherwise the overloaded color
-    # channel gets in the way
-    # tr_transforms.append(AlbuGaussionNoise())
     tr_transforms.append(AlbuGaussianBlur())
     tr_transforms.append(AlbuRandomBrightness())
     tr_transforms.append(AlbuRandomRotate90())
     tr_transforms.append(AlbuTranspose())
-    # tr_transforms.append(ContrastAugmentationTransform(p_per_sample=0.15))
 
     if params.get("do_hed"):
         tr_transforms.append(HedTransform(**params["hed_params"]))
     if params.get("do_hsv"):
         tr_transforms.append(HsvTransform(**params["hsv_params"]))
-
-    # if params.get("do_gamma"):
-    #     tr_transforms.append(
-    #         GammaTransform(params.get("gamma_range"), False, True, retain_stats=params.get("gamma_retain_stats"),
-    #                        p_per_sample=params["p_gamma"]))
 
     if params.get("do_mirror") or params.get("mirror"):
         tr_transforms.append(MirrorTransform2D(params.get("mirror_axes")))
