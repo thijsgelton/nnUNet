@@ -66,8 +66,8 @@ The json string above is just an example.
 See [nnUNetTrainerV2Multiscale](../../nnunet/training/network_training/diag/nnUNetTrainerV2MultiScale.py) for
 explanations of all the different parameters.
 
-When all folds are trained it is time to run prediction on the test set and this requires the same trainer_kwargs to be
-passed or the model cannot be instantiated:
+When all folds are trained it is time to run prediction, using nnUNet_predict, on the test set and this requires the
+same trainer_kwargs to be passed or the model cannot be instantiated:
 
 ```
 -t

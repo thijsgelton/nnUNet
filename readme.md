@@ -6,7 +6,7 @@
 documentation [here](https://github.com/DIAGNijmegen/nnUNet/blob/master/diag.md).
 This includes trainers for training on sparse data.**
 
-### **[2022_11_27]Update:** Included multi-branch multi-resolution architecture (see the [docs](documentation/tutorials/multiscale.md))
+### **[2022_11_27] Update:** Included multi-branch multi-resolution architecture (see the [docs](documentation/tutorials/multiscale.md))
 
 **[2020_10_21] Update:** We now have documentation for [common questions](documentation/common_questions.md) and
 [common issues](documentation/common_problems_and_solutions.md). We now also provide [reference epoch times for
