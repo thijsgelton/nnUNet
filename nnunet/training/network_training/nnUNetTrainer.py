@@ -298,8 +298,6 @@ class nnUNetTrainer(NetworkTrainer):
         dct = self.get_debug_information()
         save_json(dct, join(self.output_folder, "debug.json"))
         shutil_sol.copyfile(self.plans_file, join(self.output_folder_base, "plans.pkl"))
-
-    def get_debug_information(self):
         # saving some debug information
         dct = OrderedDict()
         for k in self.__dir__():

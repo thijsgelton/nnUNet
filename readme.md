@@ -56,7 +56,6 @@ For more information about nnU-Net, please read the following paper:
 Please also cite this paper if you are using nnU-Net for your research!
 
 # Table of Contents
-
 - [nnU-Net](#nnu-net)
 - [Table of Contents](#table-of-contents)
 - [Installation](#installation)
@@ -105,6 +104,7 @@ Python 2 is deprecated and not supported. Please make sure you are using Python 
    install the latest version and (IMPORTANT!) choose
    the highest CUDA version compatible with your drivers for maximum performance.
    **DO NOT JUST `PIP INSTALL NNUNET` WITHOUT PROPERLY INSTALLING PYTORCH FIRST**
+
 2) Verify that a recent version of pytorch was installed by running
     ```bash
     python -c 'import torch;print(torch.backends.cudnn.version())'
@@ -119,6 +119,7 @@ Python 2 is deprecated and not supported. Please make sure you are using Python 
 
     2) For use as integrative **framework** (this will create a copy of the nnU-Net code on your computer so that you
        can modify it as needed):
+
           ```bash
           git clone https://github.com/MIC-DKFZ/nnUNet.git
           cd nnUNet
@@ -165,7 +166,6 @@ the [Medical Segmentation Decthlon](http://medicaldecathlon.com/). Please read
 [this](documentation/dataset_conversion.md) for information on how to convert datasets to be compatible with nnU-Net.
 
 ### Experiment planning and preprocessing
-
 As a first step, nnU-Net extracts a dataset fingerprint (a set of dataset-specific properties such as
 image sizes, voxel spacings, intensity information etc). This information is used to create three U-Net configurations:
 a 2D U-Net, a 3D U-Net that operated on full resolution images as well as a 3D U-Net cascade where the first U-Net
@@ -173,6 +173,7 @@ creates a coarse segmentation map in downsampled images which is then refined by
 
 Provided that the requested raw dataset is located in the correct
 folder (`nnUNet_raw_data_base/nnUNet_raw_data/TaskXXX_MYTASK`,
+
 also see [here](documentation/dataset_conversion.md)), you can run this step with the following command:
 
 ```bash
@@ -195,6 +196,7 @@ checks on the dataset to ensure that it is compatible with nnU-Net. If this chec
 omitted in future runs. If you adhere to the dataset conversion guide (see above) then this should pass without issues :
 -)
 
+
 Note that `nnUNet_plan_and_preprocess` accepts several additional input arguments. Running `-h` will list all of them
 along with a description. If you run out of RAM during preprocessing, you may want to adapt the number of processes
 used with the `-tl` and `-tf` options.
@@ -208,7 +210,6 @@ of seconds). Preprocessing depends on image size and how powerful the CPU is. It
 tens of minutes.
 
 ### Model training
-
 nnU-Net trains all U-Net configurations in a 5-fold cross-validation. This enables nnU-Net to determine the
 postprocessing and ensembling (see next step) on the training dataset. Per default, all U-Net configurations need to
 be run on a given dataset. There are, however situations in which only some configurations (and maybe even without
@@ -414,7 +415,6 @@ After finishing the training of all folds, run `nnUNet_change_trainer_class` on 
 (see `nnUNet_change_trainer_class -h` for instructions). After that you can run inference.
 
 ### Identifying the best U-Net configuration
-
 Once all models are trained, use the following
 command to automatically determine what U-Net configuration(s) to use for test set prediction:
 
@@ -485,7 +485,6 @@ for example, this would be:
 ```bash
 nnUNet_download_pretrained_model Task029_LiTS
 ```
-
 After downloading is complete, you can use this model to run [inference](#run-inference). Keep in mind that each of
 these models has specific data requirements (Task029_LiTS runs on abdominal CT scans, others require several image
 modalities as input in a specific order).
@@ -505,7 +504,6 @@ To get you started we compiled two simple to follow examples:
 Usability not good enough? Let us know!
 
 # Extending or Changing nnU-Net
-
 Please refer to [this](documentation/extending_nnunet.md) guide.
 
 # Information on run time and potential performance bottlenecks.
@@ -522,7 +520,6 @@ We have collected solutions to common [questions](documentation/common_questions
 [problems](documentation/common_problems_and_solutions.md). Please consult these documents before you open a new issue.
 
 # Useful Resources
-
 * The [nnU-Net Workshop](https://github.com/IML-DKFZ/nnunet-workshop) is a step-by-step introduction to nnU-Net and
   visualizing
   results using MITK. Regarding nnU-Net, it includes training and inference examples and an example to train on a new

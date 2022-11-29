@@ -122,7 +122,6 @@ def main():
         pass
     else:
         fold = int(fold)
-
     plans_file, output_folder_name, dataset_directory, batch_dice, stage, \
     trainer_class = get_default_configuration(network, task, network_trainer, plans_identifier)
 
@@ -169,7 +168,7 @@ def main():
                 trainer.load_best_checkpoint(train=False)
             else:
                 trainer.load_final_checkpoint(train=False)
-
+                
         trainer.load_best_checkpoint(train=False)  # Why not load the best model?
         trainer.network.eval()
 

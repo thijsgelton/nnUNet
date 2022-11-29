@@ -149,7 +149,8 @@ def main():
         task_id = int(task_name)
         task_name = convert_id_to_task_name(task_id)
 
-    assert model in ["2d", "3d_lowres", "3d_fullres", "3d_cascade_fullres"], "-m must be 2d, 3d_lowres, 3d_fullres or "
+    assert model in ["2d", "3d_lowres", "3d_fullres", "3d_cascade_fullres"], "-m must be 2d, 3d_lowres, 3d_fullres or " \
+                                                                             "3d_cascade_fullres"
     if lowres_segmentations == "None":
         lowres_segmentations = None
 

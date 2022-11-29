@@ -393,7 +393,6 @@ class DC_and_CE_loss(nn.Module):
         if ignore_label is not None or class_weights is not None:
             assert not square_dice, 'not implemented'
             reduction = 'none'
-
         self.log_dice = log_dice
         self.weight_dice = weight_dice
         self.weight_ce = weight_ce

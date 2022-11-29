@@ -25,7 +25,6 @@ import numpy as np
 import torch
 from batchgenerators.augmentations.utils import resize_segmentation
 from batchgenerators.utilities.file_and_folder_operations import *
-
 import nnunet.utilities.shutil_sol as shutil_sol
 from nnunet.inference.segmentation_export import save_segmentation_nifti_from_softmax, save_segmentation_nifti
 from nnunet.postprocessing.connected_components import load_remove_save, load_postprocessing
@@ -273,7 +272,6 @@ def predict_cases(model, list_of_lists, output_filenames, folds, save_npz, num_t
             bytes_per_voxel = 4
             if all_in_gpu:
                 bytes_per_voxel = 2  # if all_in_gpu then the return value is half (float16)
-
             if np.prod(softmax.shape) > (2e9 / bytes_per_voxel * 0.85):  # * 0.85 just to be save
                 print(
                     "This output is too large for python process-process communication. Saving output temporarily to disk")

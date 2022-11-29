@@ -501,7 +501,6 @@ class Preprocessor3DBetterResampling(GenericPreprocessor):
     order spline for data (just like GenericPreprocessor) and seg (unlike GenericPreprocessor). It never does separate
     resampling in z.
     """
-
     def resample_and_normalize(self, data, target_spacing, properties, seg=None, force_separate_z=False):
         """
         data and seg must already have been transposed by transpose_forward. properties are the un-transposed values
@@ -775,6 +774,7 @@ class PreprocessorFor2D_edgeLength512(PreprocessorFor2D):
                 data[c][mask == 0] = 0
         print("normalization done")
         return data, seg, properties
+
 
 
 class PreprocessorFor2D_edgeLength768(PreprocessorFor2D_edgeLength512):
