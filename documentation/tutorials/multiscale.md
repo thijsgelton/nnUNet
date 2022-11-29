@@ -7,9 +7,16 @@ illustrative)
 
 ![](../images/nnU-Net architecture.png)
 
-## Plan and preprocessing
+## Preparing the data
 
-`It is assumed that the project root directory contains the nifti files and a dataset.json. If not then refer to` [this](documentation/dataset_conversion.md)
+In order to extract corresponding context patches to the target patches, the preparation of the data had to be tweaked
+slightly. You can use the [example notebook](./creat_nnUNet_data_and_dataset_json_example.ipynb) to see how to get to
+niftis from tif / xml files and how the filenames should be formatted in order to have the nnUNetTrainerV2MultiScale
+work properly. The notebook is configured such that the filename have the x and y coordinate they were sampled at in the
+filename. At the training step you will have to set coordinates_in_filename to True in the trainer_kwargs. See the next
+sections for more information.
+
+## Plan and preprocessing
 
 The original plan and preprocessing is designed to use all the VRAM that is available in contemporary GPUs, excluding
 a GB or two to allow a margin of error. To use an extra CNN to encode a patch at lower resolution, one is required to
@@ -58,7 +65,7 @@ nnUNetTrainerV2MultiScale
 <fold number>
 -p
 <plans filename from the nnUNet_plan_and_preprocess step>
---trainer_kwargs="{\"encoder_kwargs\":{\"arch\":\"resnet18\",\"pretrained\":false,\"trainable\":true},\"data_origin\":\"/data/pathology/archives/endometrium/endoaid/wsis/development/dense_annotations/tif/*\",\"spacing\":2.0,\"plot_validation_results\":true,\"debug_plot_color_values\":\"white,firebrick,pink,purple,red,green,blue,blue\",\"norm_op\":\"batch\"}"
+--trainer_kwargs="{\"encoder_kwargs\":{\"arch\":\"resnet18\",\"pretrained\":false,\"trainable\":true},\"coordinates_in_filename\":true,\"data_origin\":\"/data/pathology/archives/endometrium/endoaid/wsis/development/dense_annotations/tif/*\",\"spacing\":2.0,\"plot_validation_results\":true,\"debug_plot_color_values\":\"white,firebrick,pink,purple,red,green,blue,blue\",\"norm_op\":\"batch\"}"
 ```
 
 For trainer_kwargs it is important that this is an escaped json string with no spaces, or it won't be parsed properly.
