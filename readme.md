@@ -146,6 +146,8 @@ A typical installation of nnU-Net can be completed in less than 5 minutes. If py
 (which is what we currently recommend when using Turing GPUs), this can extend to more than an hour.
 
 # Usage
+To familiarize yourself with nnU-Net we recommend you have a look at the [Examples](#Examples) before you start with
+your own dataset.
 
 To familiarize yourself with nnU-Net we recommend you have a look at the [Examples](#Examples) before you start with
 your own dataset.
